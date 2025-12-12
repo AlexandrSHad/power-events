@@ -1,31 +1,56 @@
-#:package Microsoft.Win32.SystemEvents@10.0.1
+#:property TargetFramework=net10.0-windows
+#:package System.Management@10.0.1
 
-using Microsoft.Win32;
+using System.Management;
 
 Console.WriteLine("Power Events Logger Started");
 
-// Subscribe to PowerModeChanged event
-SystemEvents.PowerModeChanged += OnPowerModeChanged;
+// Subscribe to WMI events for sleep and wake
+var watcher = new ManagementEventWatcher(
+    new WqlEventQuery("SELECT * FROM Win32_PowerManagementEvent"));
+
+watcher.EventArrived += OnPowerEvent;
+watcher.Start();
 
 Console.WriteLine("Listening for power events. Press Ctrl+C to exit.");
 
-// Start a message loop to process system events
-using (var waitHandle = new ManualResetEvent(false))
+// Keep the application running
+Console.CancelKeyPress += (sender, e) =>
 {
-    Console.CancelKeyPress += (sender, e) =>
-    {
-        e.Cancel = true;
-        waitHandle.Set();
-    };
+    Console.WriteLine("Exiting...");
+    e.Cancel = true;
+    watcher.Stop();
+    watcher.Dispose();
+};
 
-    waitHandle.WaitOne();
+// Block the main thread
+while (true)
+{
+    System.Threading.Thread.Sleep(1000);
 }
 
-// Unsubscribe from the event before exiting
-SystemEvents.PowerModeChanged -= OnPowerModeChanged;
-
-static void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
+static void OnPowerEvent(object sender, EventArrivedEventArgs e)
 {
-    // Log the power mode change to the console
-    Console.WriteLine($"{DateTime.Now} - Power mode changed: {e.Mode}");
+    var eventType = (int)e.NewEvent.Properties["EventType"].Value;
+
+    Console.WriteLine(e);
+    Console.WriteLine(e.NewEvent);
+    foreach (var property in e.NewEvent.Properties)
+    {
+        Console.WriteLine($"Property: {property.Name} = {property.Value}");
+    }
+
+    // Log the power event based on the event type
+    switch (eventType)
+    {
+        case 4:
+            Console.WriteLine($"{DateTime.Now} - System is entering sleep.");
+            break;
+        case 7:
+            Console.WriteLine($"{DateTime.Now} - System has resumed from sleep.");
+            break;
+        default:
+            Console.WriteLine($"{DateTime.Now} - Power event occurred: {eventType}");
+            break;
+    }
 }
