@@ -1,56 +1,113 @@
 #:property TargetFramework=net10.0-windows
-#:package System.Management@10.0.1
+#:package System.Diagnostics.EventLog@10.0.1
 
-using System.Management;
+using System.Diagnostics;
 
-Console.WriteLine("Power Events Logger Started");
+Console.WriteLine("Listening for power events in Event Log...");
 
-// Subscribe to WMI events for sleep and wake
-var watcher = new ManagementEventWatcher(
-    new WqlEventQuery("SELECT * FROM Win32_PowerManagementEvent"));
-
-watcher.EventArrived += OnPowerEvent;
-watcher.Start();
-
-Console.WriteLine("Listening for power events. Press Ctrl+C to exit.");
-
-// Keep the application running
-Console.CancelKeyPress += (sender, e) =>
+using (var eventLog = new EventLog("System", ".", "Microsoft-Windows-Kernel-Power"))
 {
-    Console.WriteLine("Exiting...");
-    e.Cancel = true;
-    watcher.Stop();
-    watcher.Dispose();
-};
+    eventLog.EntryWritten += OnEntryWritten;
+    eventLog.EnableRaisingEvents = true;
 
-// Block the main thread
-while (true)
-{
-    System.Threading.Thread.Sleep(1000);
+    Console.WriteLine("Press Enter to exit.");
+    Console.ReadLine();
 }
 
-static void OnPowerEvent(object sender, EventArrivedEventArgs e)
+static void OnEntryWritten(object sender, EntryWrittenEventArgs e)
 {
-    var eventType = (int)e.NewEvent.Properties["EventType"].Value;
-
-    Console.WriteLine(e);
-    Console.WriteLine(e.NewEvent);
-    foreach (var property in e.NewEvent.Properties)
+    Console.WriteLine("");
+    Console.WriteLine("----------------------------------------");
+    Console.WriteLine($"New event log entry: {e.Entry.InstanceId}");
+    Console.WriteLine($"Category: {e.Entry.Category}");
+    Console.WriteLine($"Category number: {e.Entry.CategoryNumber}");
+    Console.WriteLine($"Entry type: {e.Entry.EntryType}");
+    Console.WriteLine($"Source: {e.Entry.Source}");
+    Console.WriteLine($"Message: {e.Entry.Message}");
+    Console.WriteLine($"Time Generated: {e.Entry.TimeGenerated}");
+    Console.WriteLine($"Time Written: {e.Entry.TimeWritten}");
+    Console.WriteLine($"Index: {e.Entry.Index}");
+    Console.WriteLine($"Machine Name: {e.Entry.MachineName}");
+    Console.WriteLine($"User Name: {e.Entry.UserName}");
+    if (e.Entry.Data != null && e.Entry.Data.Length > 0)
     {
-        Console.WriteLine($"Property: {property.Name} = {property.Value}");
+        Console.WriteLine($"Data: {BitConverter.ToString(e.Entry.Data)}");
     }
-
-    // Log the power event based on the event type
-    switch (eventType)
+    if (e.Entry.ReplacementStrings != null && e.Entry.ReplacementStrings.Length > 0)
     {
-        case 4:
-            Console.WriteLine($"{DateTime.Now} - System is entering sleep.");
-            break;
-        case 7:
-            Console.WriteLine($"{DateTime.Now} - System has resumed from sleep.");
-            break;
-        default:
-            Console.WriteLine($"{DateTime.Now} - Power event occurred: {eventType}");
-            break;
+        Console.WriteLine("Replacement Strings:");
+        foreach (var str in e.Entry.ReplacementStrings)
+        {
+            Console.WriteLine($"  - {str}");
+        }
     }
 }
+
+// ============= Description of power event Instance IDs ================ 
+
+// 506 - The system is entering Modern Standby (S0 Low Power Idle) sleep.
+//       Replacement Strings:
+//       [0] Reason 12 
+//       [1] LidOpenState false 
+//       [2] ExternalMonitorConnectedState true 
+//       [3] ScenarioInstanceId 98 
+//       [4] BatteryRemainingCapacityOnEnter 92270 
+//       [5] BatteryFullChargeCapacityOnEnter 92270 
+//       [6] ScenarioInstanceIdV2 98 
+//       [7] BootId 42 
+
+// 507 - The system is exiting Modern Standby (S0 Low Power Idle) sleep.
+//       Replacement Strings:
+//       [0] EnergyDrain 0
+//       [1] ActiveResidencyInUs 345577906 
+//       [2] NonDripsTimeActivatedInUs 0 
+//       [3] FirstDripsEntryInUs 0 
+//       [4] DripsResidencyInUs 0 
+//       [5] DurationInUs 345577906 
+//       [6] DripsTransitions 0 
+//       [7] FullChargeCapacityRatio 96 
+//       [8] AudioPlaying false 
+//       [9] Reason 31 - Input Keyboard, 32 - Input Mouse
+//       [10] AudioPlaybackInUs 0 
+//       [11] NonActivatedCpuInUs 0 
+//       [12] PowerStateAc true 
+//       [13] HwDripsResidencyInUs 0 
+//       [14] ExitLatencyInUs 185674 
+//       [15] DisconnectedStandby false 
+//       [16] AoAcCompliantNic true 
+//       [17] NonAttributedCpuInUs 0 
+//       [18] ModernSleepEnabledActionsBitmask 7 
+//       [19] ModernSleepAppliedActionsBitmask 0 
+//       [20] LidOpenState false 
+//       [21] ExternalMonitorConnectedState true 
+//       [22] ScenarioInstanceId 100 
+//       [23] IsCsSessionInProgressOnExit false 
+//       [24] BatteryRemainingCapacityOnExit 92270 
+//       [25] BatteryFullChargeCapacityOnExit 92270 
+//       [26] ScenarioInstanceIdV2 98 
+//       [27] BootId 42 
+//       [28] InputSuppressionActionCount 0 
+//       [29] NonResiliencyTimeInUs 345577906 
+//       [30] ResiliencyDripsTimeInUs 0 
+//       [31] ResiliencyHwDripsTimeInUs 0 
+//       [32] GdiOnTime 0 
+//       [33] DwmSyncFlushTime 0 
+//       [34] MonitorPowerOnTime 184528 
+//       [35] SleepEntered false 
+//       [36] ScreenOffEnergyCapacityAtStart 92270 
+//       [37] ScreenOffEnergyCapacityAtEnd 92270 
+//       [38] ScreenOffDurationInUs 345576530 
+//       [39] SleepEnergyCapacityAtStart 0 
+//       [40] SleepEnergyCapacityAtEnd 0 
+//       [41] SleepDurationInUs 0 
+//       [42] ScreenOffFullEnergyCapacityAtStart 92270 
+//       [43] ScreenOffFullEnergyCapacityAtEnd 92270 
+//       [44] SleepFullEnergyCapacityAtStart 0 
+//       [45] SleepFullEnergyCapacityAtEnd 0 
+//       [46] PowerSchemeInfo 2 
+//       [47] PowerButtonSuppressionActionCount 0 
+//       [48] ScreenOffSwDripsResidencyInUs 0 
+//       [49] ScreenOffHwDripsResidencyInUs 0 
+//       [50] SleepSwDripsResidencyInUs 0 
+//       [51] SleepHwDripsResidencyInUs 0 
+
