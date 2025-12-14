@@ -5,7 +5,7 @@ using System.Diagnostics;
 
 Console.WriteLine("Listening for power events in Event Log...");
 
-using (var eventLog = new EventLog("System", ".", "Microsoft-Windows-Kernel-Power"))
+using (var eventLog = new EventLog("System"))
 {
     eventLog.EntryWritten += OnEntryWritten;
     eventLog.EnableRaisingEvents = true;
@@ -16,6 +16,12 @@ using (var eventLog = new EventLog("System", ".", "Microsoft-Windows-Kernel-Powe
 
 static void OnEntryWritten(object sender, EntryWrittenEventArgs e)
 {
+    // Filter for Kernel-Power events only
+    if (e.Entry.Source is not "Microsoft-Windows-Kernel-Power")
+    {
+        return;
+    }
+
     Console.WriteLine("");
     Console.WriteLine("----------------------------------------");
     Console.WriteLine($"New event log entry: {e.Entry.InstanceId}");
