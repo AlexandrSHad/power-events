@@ -1,5 +1,7 @@
 #:sdk Microsoft.NET.Sdk.Web
 #:property TreatWarningsAsErrors=true
+// #:property JsonSerializerIsReflectionEnabledByDefault=true
+// #:property PublishTrimmed=false
 
 using System.Text.Json.Serialization;
 
@@ -9,7 +11,7 @@ builder.Services.AddLogging(builder => builder.AddConsole());
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
-    options.SerializerOptions.TypeInfoResolver = ProgramJsonContext.Default;
+    options.SerializerOptions.TypeInfoResolver = SourceGenerationContext.Default;
 });
 
 var app = builder.Build();
@@ -33,6 +35,4 @@ class PowerEventData
 }
 
 [JsonSerializable(typeof(PowerEventData))]
-partial class ProgramJsonContext : JsonSerializerContext
-{
-}
+partial class SourceGenerationContext : JsonSerializerContext { }

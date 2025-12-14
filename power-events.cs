@@ -2,6 +2,8 @@
 #:package System.Diagnostics.EventLog@10.0.1
 
 using System.Diagnostics;
+using System.Net.Http.Json;
+using System.Text.Json.Serialization;
 
 Console.WriteLine("Listening for power events in Event Log...");
 
@@ -14,7 +16,7 @@ using (var eventLog = new EventLog("System"))
     Console.ReadLine();
 }
 
-static void OnEntryWritten(object sender, EntryWrittenEventArgs e)
+static async void OnEntryWritten(object sender, EntryWrittenEventArgs e)
 {
     // Filter for Kernel-Power events only
     if (e.Entry.Source is not "Microsoft-Windows-Kernel-Power")
@@ -47,7 +49,51 @@ static void OnEntryWritten(object sender, EntryWrittenEventArgs e)
             Console.WriteLine($"  - {str}");
         }
     }
+
+    // Ignore other events for now
+    if (e.Entry.InstanceId != 506 && e.Entry.InstanceId != 507)
+    {
+        return;
+    }
+
+    // call http endpoint to log power event
+    using var httpClient = new HttpClient();
+
+    var state = e.Entry.InstanceId switch {
+        506 => "Standby",
+        507 => "Awake",
+        _ => "Unknown"
+    };
+
+    var powerEventData = new PowerEventData
+    {
+        State = state,
+        TimeGenerated = e.Entry.TimeGenerated
+    };
+    try
+    {
+        var response = await httpClient.PostAsJsonAsync(
+            "http://localhost:5000/power-events",
+            powerEventData,
+            SourceGenerationContext.Default.PowerEventData
+        );
+        Console.WriteLine($"Logged to server: {response.StatusCode}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"ERROR: Failed to log to server. Error message: {ex.Message}");
+    }
 }
+
+class PowerEventData
+{
+    public required string State { get; set; }
+    public required DateTime TimeGenerated { get; set; }
+}
+
+[JsonSourceGenerationOptions(WriteIndented = true)]
+[JsonSerializable(typeof(PowerEventData))]
+internal partial class SourceGenerationContext : JsonSerializerContext { }
 
 // ============= Description of power event Instance IDs ================ 
 
