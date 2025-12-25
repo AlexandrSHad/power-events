@@ -1,6 +1,6 @@
 /* Blue gradient background matching the mockup */
 body {
-  background: linear-gradient(180deg, #89B4F5 0%, #4A7BC8 50%, #3A5FA0 100%);
+  background: linear-gradient(180deg, #8fadda 0%, #4a6fab 50%, rgb(96, 124, 172) 100%);
   min-height: 100vh;
   margin: 0;
   padding: 0;
