@@ -1,0 +1,37 @@
+name: power-events
+
+services:
+  web-client:
+#    image: oleksshad/power-events.web-client:latest
+    build:
+      context: ../web-client
+      dockerfile: ../web-client/Dockerfile
+    container_name: power-events.web-client
+    ports:
+      - "5570:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  emqx:
+    image: emqx/emqx:latest
+    container_name: power-events.emqx
+    ports:
+      - "1883:1883"      # MQTT
+#      - "8083:8083"      # MQTT over WebSocket
+#      - "8084:8084"      # MQTT over WSS
+      - "18083:18083"    # Web Dashboard
+    restart: unless-stopped
+    environment:
+      - EMQX_NAME=emqx
+      - EMQX_HOST=127.0.0.1
+    healthcheck:
+      test: ["CMD", "emqx", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

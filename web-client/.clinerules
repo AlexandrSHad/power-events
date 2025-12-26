@@ -1,0 +1,97 @@
+# Vue.js Power Events Monitoring Dashboard - Development Instructions
+
+## Project Overview
+Single-page Vue 3 application with Vuetify 3 displaying laptop power monitoring dashboard.
+- **Framework:** Vue 3 with Composition API
+- **UI Library:** Vuetify 3 (Material Design)
+- **Build Tool:** Vite
+- **Port:** 5570
+- **Design Reference:** `.design/dashboard.png` in parent directory
+
+## Architecture
+
+### Component Structure
+```
+src/components/
+├── AppHeader.vue        - Header with logo, title "Monitoring", subtitle
+├── StatusCard.vue       - Main status card (laptop icon, timer, status labels)
+├── StatusTimer.vue      - Time since last update display (e.g., "14.0m")
+└── HistoryTimeline.vue  - Event timeline with alternating left/right layout
+```
+
+### Data Management
+- **Mock Data:** `src/composables/useMockData.js`
+- **Current Status:** `{ state: 'Awake'|'Standby'|'Power-off', lastUpdate: Date }`
+- **Event History:** Array of `{ state, description, timeGenerated }`
+
+### Styling
+- **Global:** `src/style.css` - Blue gradient background, card styles
+- **Theme:** `src/plugins/vuetify.js` - Primary color #5E92F3
+- **Gradient:** 3-color blue gradient (light → medium → dark)
+
+## Key Vuetify Components Used
+- `v-app`, `v-app-bar`, `v-main` - App layout
+- `v-card`, `v-card-text` - Status and event cards
+- `v-timeline`, `v-timeline-item` - Event history
+- `v-container`, `v-row`, `v-col` - Responsive grid
+- `v-icon` - Material Design icons (mdi-laptop, mdi-dots-vertical)
+
+## Development Guidelines
+
+### When Making Changes
+
+1. **Adding New Components:**
+   - Place in `src/components/`
+   - Use Composition API (`<script setup>`)
+   - Import and use in `App.vue` or parent component
+   - Follow Vuetify component patterns
+
+2. **Modifying Mock Data:**
+   - Edit `src/composables/useMockData.js`
+   - Maintain data structure for compatibility with components
+
+3. **Styling Updates:**
+   - Global styles → `src/style.css`
+   - Theme colors → `src/plugins/vuetify.js`
+   - Component-specific → use Vuetify props (color, elevation, etc.)
+
+4. **Backend Integration (Future):**
+   - Replace `useMockData.js` with API calls
+   - Backend runs on `localhost:5000` (see `../server.cs`)
+   - Event format: `{ State: string, TimeGenerated: DateTime }`
+
+### Common Tasks
+
+**Change Port:**
+- Edit `vite.config.js` → `server.port`
+
+**Update Gradient:**
+- Edit `src/style.css` → body background gradient
+
+**Modify Timeline Layout:**
+- Edit `src/components/HistoryTimeline.vue`
+- Alternating logic uses `index % 2`
+
+**Add Real-time Updates:**
+- Add timer interval in `StatusTimer.vue`
+- Use `setInterval` with cleanup in `onUnmounted`
+
+**Connect to Backend:**
+- Install axios: `npm install axios`
+- Create API service in `src/services/api.js`
+- Replace mock data in `App.vue`
+
+### Running the Application
+```bash
+npm run dev    # Start dev server on http://localhost:5570
+npm run build  # Build for production
+```
+
+### Dependencies
+Core: `vue`, `vuetify`, `vite-plugin-vuetify`, `@mdi/font`, `date-fns`
+
+## Important Notes
+- Timer is currently **static** (no auto-update)
+- Data is **mock only** (no backend connection)
+- Design follows `../.design/dashboard.png` mockup
+- Status labels are **display-only** (not interactive)
