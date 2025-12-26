@@ -1,9 +1,20 @@
 #:property TargetFramework=net10.0-windows
 #:package System.Diagnostics.EventLog@10.0.1
+#:package MQTTnet@5.0.1.1416
 
 using System.Diagnostics;
-using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using MQTTnet;
+
+// Initialize MQTT client
+await MqttPublisher.ConnectAsync();
+
+await MqttPublisher.PublishAsync("power-events", new PowerEventData
+{
+    State = "Test",
+    TimeGenerated = DateTime.Now
+});
 
 Console.WriteLine("Listening for power events in Event Log...");
 
@@ -56,9 +67,7 @@ static async void OnEntryWritten(object sender, EntryWrittenEventArgs e)
         return;
     }
 
-    // call http endpoint to log power event
-    using var httpClient = new HttpClient();
-
+    // Publish to MQTT broker
     var state = e.Entry.InstanceId switch {
         506 => "Standby",
         507 => "Awake",
@@ -70,19 +79,8 @@ static async void OnEntryWritten(object sender, EntryWrittenEventArgs e)
         State = state,
         TimeGenerated = e.Entry.TimeGenerated
     };
-    try
-    {
-        var response = await httpClient.PostAsJsonAsync(
-            "http://localhost:5000/power-events",
-            powerEventData,
-            SourceGenerationContext.Default.PowerEventData
-        );
-        Console.WriteLine($"Logged to server: {response.StatusCode}");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"ERROR: Failed to log to server. Error message: {ex.Message}");
-    }
+
+    await MqttPublisher.PublishAsync("power-events", powerEventData);
 }
 
 class PowerEventData
@@ -94,6 +92,56 @@ class PowerEventData
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(PowerEventData))]
 internal partial class SourceGenerationContext : JsonSerializerContext { }
+
+static class MqttPublisher
+{
+    private static IMqttClient? _client;
+
+    public static async Task ConnectAsync()
+    {
+        Console.WriteLine("Connecting to MQTT broker...");
+
+        _client = new MqttClientFactory().CreateMqttClient();
+
+        var options = new MqttClientOptionsBuilder()
+            .WithTcpServer("localhost", 1883)
+            .WithClientId("power-events-publisher")
+            .Build();
+
+        await _client.ConnectAsync(options);
+
+        Console.WriteLine("Connected to MQTT broker at localhost:1883");
+    }
+
+    public static async Task PublishAsync(string topic, PowerEventData data)
+    {
+        if (_client is null || !_client.IsConnected)
+        {
+            Console.WriteLine("ERROR: MQTT client not connected");
+            return;
+        }
+
+        try
+        {
+            // TODO: use binary serialization for smaller payloads
+            // TODO: message persistence
+            var payload = JsonSerializer.Serialize(data, SourceGenerationContext.Default.PowerEventData);
+
+            var message = new MqttApplicationMessageBuilder()
+                .WithTopic(topic)
+                .WithPayload(payload)
+                .WithQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce)
+                .Build();
+
+            await _client.PublishAsync(message);
+            Console.WriteLine($"Published to MQTT topic '{topic}': {payload}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"ERROR: Failed publishing to MQTT. {ex.Message}");
+        }
+    }
+}
 
 // ============= Description of power event Instance IDs ================ 
 
