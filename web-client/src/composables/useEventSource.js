@@ -1,6 +1,8 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 
-export function useEventSource(url = 'http://localhost:5000/events') {
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
+export function useEventSource(url = `${backendUrl}/events`) {
   const currentStatus = ref({
     state: 'Unknown',
     lastUpdate: new Date()
