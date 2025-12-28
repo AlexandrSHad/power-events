@@ -8,9 +8,9 @@
       <StatusTimer :last-update="lastUpdate" />
 
       <div class="d-flex justify-space-around mt-6">
-        <div class="text-body-1">Awake</div>
-        <div class="text-body-1">Standby</div>
-        <div class="text-body-1">Power-off</div>
+        <div class="text-body-1">{{ currentStatus }}</div>
+        <!-- <div class="text-body-1">Standby</div>
+        <div class="text-body-1">Power-off</div> -->
       </div>
     </v-card-text>
   </v-card>

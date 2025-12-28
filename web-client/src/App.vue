@@ -25,10 +25,10 @@
 </template>
 
 <script setup>
-import { useMockData } from './composables/useMockData'
+import { useEventSource } from './composables/useEventSource'
 import AppHeader from './components/AppHeader.vue'
 import StatusCard from './components/StatusCard.vue'
 import HistoryTimeline from './components/HistoryTimeline.vue'
 
-const { currentStatus, eventHistory } = useMockData()
+const { currentStatus, eventHistory } = useEventSource()
 </script>
