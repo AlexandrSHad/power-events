@@ -47,37 +47,39 @@ app.MapPost("/power-events", (ILogger<Program> logger, PowerEventData eventData)
 });
 
 // SSE endpoint for real-time power events
-app.MapGet("/events", (Channel<PowerEventData> channel, CancellationToken ct) =>
+app.MapGet("/events", (ILogger<Program> logger, Channel<PowerEventData> channel, CancellationToken ct) =>
 {
-    // async IAsyncEnumerable<PowerEventData> StreamEvents(
-    //     [EnumeratorCancellation] CancellationToken cancellationToken)
-    // {
-    //     await foreach (var evt in channel.Reader.ReadAllAsync(cancellationToken))
-    //     {
-    //         yield return evt;
-    //     }
-    // }
-
-    // Uncomment for testing without MQTT
     async IAsyncEnumerable<PowerEventData> StreamEvents(
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        while (true)
+        logger.LogInformation("[{ReceivedAt}] - Starting SSE stream for client", DateTime.Now);
+        await foreach (var evt in channel.Reader.ReadAllAsync(cancellationToken))
         {
-            yield return new PowerEventData
-            {
-                State = "Awake",
-                TimeGenerated = DateTime.Now
-            };
-            Task.Delay(1000, cancellationToken).Wait(cancellationToken);
+            logger.LogInformation("[{ReceivedAt}] - Pushed message to SSE stream: State={State}, TimeGenerated={TimeGenerated}", DateTime.Now, evt.State, evt.TimeGenerated);
+            yield return evt;
         }
     }
+
+    // Uncomment for testing without MQTT
+    // async IAsyncEnumerable<PowerEventData> StreamEvents(
+    //     [EnumeratorCancellation] CancellationToken cancellationToken)
+    // {
+    //     while (true)
+    //     {
+    //         yield return new PowerEventData
+    //         {
+    //             State = "Awake",
+    //             TimeGenerated = DateTime.Now
+    //         };
+    //         Task.Delay(1000, cancellationToken).Wait(cancellationToken);
+    //     }
+    // }
 
     return TypedResults.ServerSentEvents(StreamEvents(ct), eventType: "power-event");
 });
 
-app.Urls.Clear();
-app.Urls.Add("http://localhost:5550");
+// app.Urls.Clear();
+// app.Urls.Add("http://localhost:5550");
 
 await app.RunAsync();
 

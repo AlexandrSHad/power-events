@@ -12,7 +12,7 @@ await MqttPublisher.ConnectAsync();
 
 await MqttPublisher.PublishAsync("power-events", new PowerEventData
 {
-    State = "Test",
+    State = "EMQX Working",
     TimeGenerated = DateTime.Now
 });
 
@@ -103,14 +103,18 @@ static class MqttPublisher
 
         _client = new MqttClientFactory().CreateMqttClient();
 
+        //var host = "localhost";
+        var host = "rpi.local";
+        var port = 1883;
+
         var options = new MqttClientOptionsBuilder()
-            .WithTcpServer("localhost", 1883)
+            .WithTcpServer(host, port)
             .WithClientId("power-events-publisher")
             .Build();
 
         await _client.ConnectAsync(options);
 
-        Console.WriteLine("Connected to MQTT broker at localhost:1883");
+        Console.WriteLine($"Connected to MQTT broker at {host}:{port}");
     }
 
     public static async Task PublishAsync(string topic, PowerEventData data)
