@@ -49,32 +49,35 @@ app.MapPost("/power-events", (ILogger<Program> logger, PowerEventData eventData)
 // SSE endpoint for real-time power events
 app.MapGet("/events", (Channel<PowerEventData> channel, CancellationToken ct) =>
 {
-    async IAsyncEnumerable<PowerEventData> StreamEvents(
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        await foreach (var evt in channel.Reader.ReadAllAsync(cancellationToken))
-        {
-            yield return evt;
-        }
-    }
-
-    // Uncomment for testing without MQTT
     // async IAsyncEnumerable<PowerEventData> StreamEvents(
     //     [EnumeratorCancellation] CancellationToken cancellationToken)
     // {
-    //     while (true)
+    //     await foreach (var evt in channel.Reader.ReadAllAsync(cancellationToken))
     //     {
-    //         yield return new PowerEventData
-    //         {
-    //             State = "Awake",
-    //             TimeGenerated = DateTime.Now
-    //         };
-    //         Task.Delay(1000, cancellationToken).Wait(cancellationToken);
+    //         yield return evt;
     //     }
     // }
 
+    // Uncomment for testing without MQTT
+    async IAsyncEnumerable<PowerEventData> StreamEvents(
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            yield return new PowerEventData
+            {
+                State = "Awake",
+                TimeGenerated = DateTime.Now
+            };
+            Task.Delay(1000, cancellationToken).Wait(cancellationToken);
+        }
+    }
+
     return TypedResults.ServerSentEvents(StreamEvents(ct), eventType: "power-event");
 });
+
+app.Urls.Clear();
+app.Urls.Add("http://localhost:5550");
 
 await app.RunAsync();
 
@@ -89,18 +92,23 @@ partial class SourceGenerationContext : JsonSerializerContext { }
 
 class MqttSubscriberService(
     Channel<PowerEventData> channel,
-    ILogger<MqttSubscriberService> logger
+    ILogger<MqttSubscriberService> logger,
+    IConfiguration configuration
 ) : BackgroundService
 {
     private readonly Channel<PowerEventData> _channel = channel;
     private readonly ILogger<MqttSubscriberService> _logger = logger;
+    private readonly IConfiguration _configuration = configuration;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var mqttHost = _configuration["Mqtt:Host"] ?? "localhost";
+        var mqttPort = int.Parse(_configuration["Mqtt:Port"] ?? "1883");
+
         var mqttClient = new MqttClientFactory().CreateMqttClient();
 
         var options = new MqttClientOptionsBuilder()
-            .WithTcpServer("localhost", 1883)
+            .WithTcpServer(mqttHost, mqttPort)
             .WithClientId("server-sse-subscriber")
             .Build();
 
@@ -117,7 +125,7 @@ class MqttSubscriberService(
         };
 
         await mqttClient.ConnectAsync(options, stoppingToken);
-        _logger.LogInformation("Connected to MQTT broker at localhost:1883");
+        _logger.LogInformation("Connected to MQTT broker at {Host}:{Port}", mqttHost, mqttPort);
 
         var subscribeOptions = new MqttClientSubscribeOptionsBuilder()
             .WithTopicFilter("power-events")
