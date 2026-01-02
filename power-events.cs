@@ -119,10 +119,18 @@ static class MqttPublisher
 
     public static async Task PublishAsync(string topic, PowerEventData data)
     {
-        if (_client is null || !_client.IsConnected)
+        if (_client is null)
         {
-            Console.WriteLine("ERROR: MQTT client not connected");
+            Console.WriteLine("ERROR: MQTT client not initialized, connect to broker first");
             return;
+        }
+
+        // TODO: use timer reconnection + message queue for buffering messages while disconnected
+        if (!_client.IsConnected)
+        {
+            Console.WriteLine("Reconnecting to MQTT broker...");
+            await _client.ReconnectAsync();
+            Console.WriteLine("Reconnected to MQTT broker");
         }
 
         try
