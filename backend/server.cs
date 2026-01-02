@@ -4,6 +4,7 @@
 // #:property JsonSerializerIsReflectionEnabledByDefault=true
 // #:property PublishTrimmed=false
 
+using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -49,14 +50,27 @@ app.MapPost("/power-events", (ILogger<Program> logger, PowerEventData eventData)
 // SSE endpoint for real-time power events
 app.MapGet("/events", (ILogger<Program> logger, Channel<PowerEventData> channel, CancellationToken ct) =>
 {
-    async IAsyncEnumerable<PowerEventData> StreamEvents(
+    async IAsyncEnumerable<SseItem<PowerEventData>> StreamEvents(
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         logger.LogInformation("[{ReceivedAt}] - Starting SSE stream for client", DateTime.Now);
+
+        // Send initial event to establish connection
+        yield return new SseItem<PowerEventData>
+        (
+            data: null!,
+            eventType: "connection-established"
+        );
+
         await foreach (var evt in channel.Reader.ReadAllAsync(cancellationToken))
         {
+            // Send regular updates
             logger.LogInformation("[{ReceivedAt}] - Pushed message to SSE stream: State={State}, TimeGenerated={TimeGenerated}", DateTime.Now, evt.State, evt.TimeGenerated);
-            yield return evt;
+            yield return new SseItem<PowerEventData>
+            (
+                data: evt,
+                eventType: "power-event"
+            );
         }
     }
 
@@ -75,7 +89,7 @@ app.MapGet("/events", (ILogger<Program> logger, Channel<PowerEventData> channel,
     //     }
     // }
 
-    return TypedResults.ServerSentEvents(StreamEvents(ct), eventType: "power-event");
+    return TypedResults.ServerSentEvents(StreamEvents(ct));
 });
 
 // app.Urls.Clear();

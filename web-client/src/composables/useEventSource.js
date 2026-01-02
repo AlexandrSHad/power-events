@@ -14,6 +14,7 @@ export function useEventSource(url = `${backendUrl}/events`) {
   let eventSource = null
 
   const connect = () => {
+    console.log('Connecting to SSE at', url);
     eventSource = new EventSource(url)
 
     eventSource.onopen = () => {
