@@ -3,8 +3,8 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { differenceInMinutes } from 'date-fns'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { differenceInMinutes, differenceInSeconds } from 'date-fns'
 
 const props = defineProps({
   lastUpdate: {
@@ -13,8 +13,21 @@ const props = defineProps({
   }
 })
 
+const now = ref(new Date())
+let interval
+
+onMounted(() => {
+  interval = setInterval(() => {
+    now.value = new Date()
+  }, 60*1000)
+})
+
+onUnmounted(() => {
+  clearInterval(interval)
+})
+
 const formattedTime = computed(() => {
-  const minutes = differenceInMinutes(new Date(), props.lastUpdate)
-  return `${minutes.toFixed(1)}m`
+  const minutes = differenceInMinutes(now.value, props.lastUpdate)
+  return `${minutes}m`
 })
 </script>
