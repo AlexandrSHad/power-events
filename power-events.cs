@@ -110,6 +110,7 @@ static class MqttPublisher
         var options = new MqttClientOptionsBuilder()
             .WithTcpServer(host, port)
             .WithClientId("power-events-publisher")
+            .WithKeepAlivePeriod(TimeSpan.FromDays(1))
             .Build();
 
         await _client.ConnectAsync(options);
@@ -128,9 +129,11 @@ static class MqttPublisher
         // TODO: use timer reconnection + message queue for buffering messages while disconnected
         if (!_client.IsConnected)
         {
-            Console.WriteLine("Reconnecting to MQTT broker...");
-            await _client.ReconnectAsync();
-            Console.WriteLine("Reconnected to MQTT broker");
+            Console.WriteLine("ERROR: MQTT client has been disconnected");
+            return;
+            // Console.WriteLine("Reconnecting to MQTT broker...");
+            // await _client.ReconnectAsync();
+            // Console.WriteLine("Reconnected to MQTT broker");
         }
 
         try
