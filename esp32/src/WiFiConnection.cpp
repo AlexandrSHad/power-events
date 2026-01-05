@@ -11,6 +11,7 @@ void WiFiConnection::connect() {
   if (hasCredentials()) {
     showLed(5, 5, 0);  // Yellow - has credentials, connecting
     delay(1000);
+    showLed(0, 0, 0);
   } else {
     showLed(0, 0, 5);  // Blue - no credentials, portal will open
   }
