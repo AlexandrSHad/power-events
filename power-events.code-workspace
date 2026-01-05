@@ -1,0 +1,25 @@
+{
+	"folders": [
+		{
+			"name": ".build",
+			"path": ".build"
+		},
+		{
+			"name": ".design",
+			"path": ".design"
+		},
+		{
+			"name": "backend",
+			"path": "backend"
+		},
+		{
+			"name": "esp32",
+			"path": "esp32"
+		},
+		{
+			"name": "web-client",
+			"path": "web-client"
+		}
+	],
+	"settings": {}
+}
