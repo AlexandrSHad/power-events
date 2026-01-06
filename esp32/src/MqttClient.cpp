@@ -42,16 +42,21 @@ void MqttClient::reconnect() {
         _mqttClient.subscribe(_subscribeTopic);
       }
     } else {
-      delay(5000);
+      delay(2000);
     }
   }
 }
 
 void MqttClient::mqttCallback(char* topic, byte* payload, unsigned int length) {
+  Serial0.printf("MQTT received on topic: %s\n", topic);
+
   if (_instance != nullptr && _instance->_userCallback != nullptr) {
     char message[length + 1];
     memcpy(message, payload, length);
     message[length] = '\0';
+    
+    Serial0.printf("Payload: %s\n", message);
+
     _instance->_userCallback(topic, message);
   }
 }

@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include "WiFiConnection.h"
 #include "MqttClient.h"
 
@@ -10,42 +11,52 @@
 WiFiConnection wifi("ESP32-S3-01-setup", RGB_LED_PIN);
 MqttClient mqtt(MQTT_BROKER, MQTT_PORT);
 
-volatile bool powerEventReceived = false;
-unsigned long eventLedStartTime = 0;
-bool eventLedActive = false;
+String eventState = "Unknown";
 
 void onPowerEvent(const char* topic, const char* payload) {
-  powerEventReceived = true;
+  JsonDocument doc;
+  if (deserializeJson(doc, payload) != DeserializationError::Ok) {
+    return;
+  }
+
+  const char* state = doc["State"];
+  
+  if (state == nullptr) {
+    Serial0.println("State: null");
+    return;
+  }
+
+  Serial0.printf("State: %s\n", state);
+  eventState = state;
 }
 
 void setup() {
+  Serial0.begin(115200);
+
+  Serial0.println("Starting the board...");
   pinMode(RGB_LED_PIN, OUTPUT);
+
+  Serial0.println("Connecting to WiFi...");
   wifi.connect();
 
+  Serial0.println("Connecting to EMQX broker...");
   mqtt.connect();
   mqtt.subscribe(MQTT_TOPIC, onPowerEvent);
+
+  Serial0.println("Started the board. Listening for power events...");
 }
 
 void loop() {
   mqtt.loop();
 
-  if (powerEventReceived) {
-    powerEventReceived = false;
-    eventLedActive = true;
-    eventLedStartTime = millis();
+  if (eventState == "Awake") {
+    neopixelWrite(RGB_LED_PIN, 0, 5, 0);  // Green
+  } else if (eventState == "Standby") {
+    neopixelWrite(RGB_LED_PIN, 5, 0, 0);  // Red
+  } else {
     neopixelWrite(RGB_LED_PIN, 5, 0, 5);  // Purple
   }
-
-  if (eventLedActive && (millis() - eventLedStartTime >= 2000)) {
-    eventLedActive = false;
-    neopixelWrite(RGB_LED_PIN, 0, 0, 0);
-  }
-
-  if (!eventLedActive) {
-    // Awaiting messages - blink green
-    neopixelWrite(RGB_LED_PIN, 0, 5, 0);
-    delay(500);
-    neopixelWrite(RGB_LED_PIN, 0, 0, 0);
-    delay(2000);
-  }
+  delay(250);
+  neopixelWrite(RGB_LED_PIN, 0, 0, 0);
+  delay(500);
 }
