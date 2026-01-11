@@ -17,10 +17,15 @@
 			"path": "esp32"
 		},
 		{
+			"name": "esp32-display",
+			"path": "esp32-display"
+		},
+		{
 			"name": "web-client",
 			"path": "web-client"
 		},
 		{
+			"name": "windows-events-listener",
 			"path": "windows-events-listener"
 		}
 	],
