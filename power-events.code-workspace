@@ -19,6 +19,9 @@
 		{
 			"name": "web-client",
 			"path": "web-client"
+		},
+		{
+			"path": "windows-events-listener"
 		}
 	],
 	"settings": {}

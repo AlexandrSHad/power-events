@@ -61,18 +61,20 @@ static async void OnEntryWritten(object sender, EntryWrittenEventArgs e)
         }
     }
 
-    // Ignore other events for now
-    if (e.Entry.InstanceId != 506 && e.Entry.InstanceId != 507)
-    {
-        return;
-    }
-
     // Publish to MQTT broker
     var state = e.Entry.InstanceId switch {
+        42 => "Standby", // TODO: this is a Sleep, check it is the same as Modern Standby
+        107 => "Awake",
         506 => "Standby",
         507 => "Awake",
         _ => "Unknown"
     };
+
+    // Ignore other events for now
+    if (state == "Unknown")
+    {
+        return;
+    }
 
     var powerEventData = new PowerEventData
     {
@@ -146,6 +148,7 @@ static class MqttPublisher
                 .WithTopic(topic)
                 .WithPayload(payload)
                 .WithQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce)
+                .WithRetainFlag()
                 .Build();
 
             await _client.PublishAsync(message);
@@ -158,7 +161,24 @@ static class MqttPublisher
     }
 }
 
-// ============= Description of power event Instance IDs ================ 
+// ============= Description of power event Instance IDs ================
+// 42 - The system is entering sleep.
+//       Replacement Strings:
+//       [0] TargetState 5 
+//       [1] EffectiveState 5 
+//       [2] Reason 4 - Application API
+//       [3] Flags 0 
+//       [4] TransitionsToOn 1 
+
+// 107 - The system has resumed from sleep.
+//       Replacement Strings:
+//       [0] TargetState 5 
+//       [1] EffectiveState 5 
+//       [2] WakeFromState 5 
+//       [3] ProgrammedWakeTimeAc 1601-01-01T00:00:00.0000000Z 
+//       [4] ProgrammedWakeTimeDc 1601-01-01T00:00:00.0000000Z 
+//       [5] WakeRequesterTypeAc 0 
+//       [6] WakeRequesterTypeDc 0 
 
 // 506 - The system is entering Modern Standby (S0 Low Power Idle) sleep.
 //       Replacement Strings:
