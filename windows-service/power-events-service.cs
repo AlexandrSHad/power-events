@@ -1,11 +1,14 @@
 #:property TargetFramework=net10.0-windows
+#:property BuiltInComInteropSupport=true
 #:package System.Diagnostics.EventLog@10.0.1
 #:package MQTTnet@5.0.1.1416
 #:package Microsoft.Extensions.Hosting.WindowsServices@8.0.0
+#:package Hardware.Info@101.1.0.1
 
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -17,6 +20,7 @@ var host = Host.CreateDefaultBuilder(args)
     {
         services.AddSingleton<MqttPublisher>();
         services.AddHostedService<PowerEventsBackgroundService>();
+        services.AddHostedService<SystemMetricsBackgroundService>();
     })
     .Build();
 
@@ -24,7 +28,6 @@ await host.RunAsync();
 
 internal sealed class PowerEventsBackgroundService(MqttPublisher mqttPublisher) : BackgroundService
 {
-    private readonly MqttPublisher _mqttPublisher = mqttPublisher;
     private EventLog? _eventLog;
     private CancellationToken _stoppingToken;
 
@@ -32,10 +35,11 @@ internal sealed class PowerEventsBackgroundService(MqttPublisher mqttPublisher) 
     {
         _stoppingToken = stoppingToken;
 
-        await _mqttPublisher.ConnectAsync(stoppingToken);
-        await _mqttPublisher.PublishAsync(
+        await mqttPublisher.ConnectAsync(stoppingToken);
+        await mqttPublisher.PublishAsync(
             "power-events",
             new PowerEventData { State = "EMQX Working", TimeGenerated = DateTime.Now },
+            SourceGenerationContext.Default.PowerEventData,
             stoppingToken);
 
         _eventLog = new EventLog("System");
@@ -103,7 +107,51 @@ internal sealed class PowerEventsBackgroundService(MqttPublisher mqttPublisher) 
             TimeGenerated = e.Entry.TimeGenerated
         };
 
-        await _mqttPublisher.PublishAsync("power-events", powerEventData, _stoppingToken);
+        await mqttPublisher.PublishAsync("power-events", powerEventData, SourceGenerationContext.Default.PowerEventData, _stoppingToken);
+    }
+}
+
+internal sealed class SystemMetricsBackgroundService(MqttPublisher mqttPublisher, ILogger<SystemMetricsBackgroundService> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var hardwareInfo = new Hardware.Info.HardwareInfo();
+
+        try
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    hardwareInfo.RefreshCPUList();
+                    hardwareInfo.RefreshMemoryStatus();
+
+                    var cpuPercent = hardwareInfo.CpuList[0].PercentProcessorTime;
+                    var memoryPercent = Math.Round((hardwareInfo.MemoryStatus.TotalPhysical - hardwareInfo.MemoryStatus.AvailablePhysical)
+                        / (double)hardwareInfo.MemoryStatus.TotalPhysical * 100);
+
+                    var metricsData = new SystemMetricsData
+                    {
+                        CpuPercent = cpuPercent,
+                        MemoryPercent = memoryPercent,
+                        Timestamp = DateTime.Now
+                    };
+
+                    logger.LogInformation("Collected system metrics: CPU {CpuPercent}%, Memory {MemoryPercent}%", cpuPercent, memoryPercent);
+                    await mqttPublisher.PublishAsync("system-metrics", metricsData, SourceGenerationContext.Default.SystemMetricsData, stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Error collecting system metrics");
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // expected on shutdown
+        }
     }
 }
 
@@ -113,8 +161,16 @@ internal sealed class PowerEventData
     public required DateTime TimeGenerated { get; set; }
 }
 
+internal sealed class SystemMetricsData
+{
+    public required double CpuPercent { get; set; }
+    public required double MemoryPercent { get; set; }
+    public required DateTime Timestamp { get; set; }
+}
+
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(PowerEventData))]
+[JsonSerializable(typeof(SystemMetricsData))]
 internal partial class SourceGenerationContext : JsonSerializerContext { }
 
 internal sealed class MqttPublisher(ILogger<MqttPublisher> logger)
@@ -141,7 +197,7 @@ internal sealed class MqttPublisher(ILogger<MqttPublisher> logger)
         logger.LogInformation("Connected to MQTT broker at {Host}:{Port}", host, port);
     }
 
-    public async Task PublishAsync(string topic, PowerEventData data, CancellationToken cancellationToken = default)
+    public async Task PublishAsync<T>(string topic, T data, JsonTypeInfo<T> jsonTypeInfo, CancellationToken cancellationToken = default)
     {
         if (_client is null)
         {
@@ -157,7 +213,7 @@ internal sealed class MqttPublisher(ILogger<MqttPublisher> logger)
 
         try
         {
-            var payload = JsonSerializer.Serialize(data, SourceGenerationContext.Default.PowerEventData);
+            var payload = JsonSerializer.Serialize(data, jsonTypeInfo);
 
             var message = new MqttApplicationMessageBuilder()
                 .WithTopic(topic)
