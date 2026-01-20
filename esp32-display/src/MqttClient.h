@@ -3,8 +3,14 @@
 #include <Arduino.h>
 #include <PubSubClient.h>
 #include <WiFiClient.h>
+#include <vector>
 
 typedef void (*MqttMessageCallback)(const char* topic, const char* payload);
+
+struct TopicHandler {
+    String topic;
+    MqttMessageCallback callback;
+};
 
 class MqttClient {
 public:
@@ -20,8 +26,7 @@ private:
   PubSubClient _mqttClient;
   const char* _broker;
   uint16_t _port;
-  const char* _subscribeTopic;
-  MqttMessageCallback _userCallback;
+  std::vector<TopicHandler> _subscriptions;
 
   void reconnect();
   static void mqttCallback(char* topic, byte* payload, unsigned int length);

@@ -133,11 +133,11 @@ internal sealed class SystemMetricsBackgroundService(MqttPublisher mqttPublisher
                     var metricsData = new SystemMetricsData
                     {
                         CpuPercent = cpuPercent,
-                        MemoryPercent = memoryPercent,
+                        RamPercent = memoryPercent,
                         Timestamp = DateTime.Now
                     };
 
-                    logger.LogInformation("Collected system metrics: CPU {CpuPercent}%, Memory {MemoryPercent}%", cpuPercent, memoryPercent);
+                    logger.LogInformation("Collected system metrics: CPU {CpuPercent}%, RAM {RamPercent}%", cpuPercent, memoryPercent);
                     await mqttPublisher.PublishAsync("system-metrics", metricsData, SourceGenerationContext.Default.SystemMetricsData, stoppingToken);
                 }
                 catch (Exception ex)
@@ -164,7 +164,7 @@ internal sealed class PowerEventData
 internal sealed class SystemMetricsData
 {
     public required double CpuPercent { get; set; }
-    public required double MemoryPercent { get; set; }
+    public required double RamPercent { get; set; }
     public required DateTime Timestamp { get; set; }
 }
 

@@ -34,6 +34,9 @@
 //#define COLOR_OFF_TEXT         lv_color_hex(0xCCCCCC)  // Grayish white for OFF
 #define COLOR_CHECKMARK        lv_color_hex(0x00E676)  // Intense green
 #define COLOR_QUESTION_MARK    lv_color_hex(0xFFB300)  // Yellow/amber
+#define COLOR_CPU_ARC          COLOR_CHECKMARK
+#define COLOR_RAM_ARC          lv_color_hex(0x00D4FF)  // Cyan
+#define COLOR_ARC_BACKGROUND   lv_color_hex(0x2A2A2A)  // Dark gray track
 
 // =============================================================================
 // Layout Constants
@@ -57,6 +60,18 @@ typedef enum {
 // =============================================================================
 static PowerStatus current_status = STATUS_UNKNOWN;
 static lv_obj_t* screens[STATUS_COUNT] = {NULL, NULL, NULL, NULL};
+
+// Metrics data
+static float current_cpu_percent = 0.0f;
+static float current_ram_percent = 0.0f;
+static float target_cpu_percent = 0.0f;
+static float target_ram_percent = 0.0f;
+
+// Metrics screen UI elements
+static lv_obj_t* metrics_screen = NULL;
+static lv_obj_t* cpu_arc = NULL;
+static lv_obj_t* ram_arc = NULL;
+static lv_obj_t* center_label = NULL;
 
 // WiFi and MQTT
 WiFiConnection wifi("ESP32-Display-setup", RGB_LED_PIN);
@@ -301,6 +316,153 @@ lv_obj_t* create_status_screen(PowerStatus status) {
     return screen;
 }
 
+lv_obj_t* create_metrics_screen() {
+    // Create new screen
+    lv_obj_t* screen = lv_obj_create(NULL);
+
+    // Set dark background
+    lv_obj_set_style_bg_color(screen, COLOR_BACKGROUND, 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+
+    // CPU Arc (outer) - 200px diameter, 16px width
+    cpu_arc = lv_arc_create(screen);
+    lv_obj_set_size(cpu_arc, 200, 200);
+    lv_obj_center(cpu_arc);
+    lv_arc_set_rotation(cpu_arc, 135);  // Start from bottom-left
+    lv_arc_set_bg_angles(cpu_arc, 0, 270);  // 270° sweep
+    lv_arc_set_angles(cpu_arc, 0, 0);  // Start at 0%
+    lv_obj_remove_style(cpu_arc, NULL, LV_PART_KNOB);  // Remove knob
+    lv_obj_clear_flag(cpu_arc, LV_OBJ_FLAG_CLICKABLE);  // Not clickable
+
+    // CPU arc background (track)
+    lv_obj_set_style_arc_color(cpu_arc, COLOR_ARC_BACKGROUND, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(cpu_arc, 16, LV_PART_MAIN);
+
+    // CPU arc indicator
+    lv_obj_set_style_arc_color(cpu_arc, COLOR_CPU_ARC, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(cpu_arc, 16, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(cpu_arc, true, LV_PART_INDICATOR);  // Rounded ends
+
+    // RAM Arc (inner) - 160px diameter, 14px width
+    ram_arc = lv_arc_create(screen);
+    lv_obj_set_size(ram_arc, 160, 160);
+    lv_obj_center(ram_arc);
+    lv_arc_set_rotation(ram_arc, 135);  // Start from bottom-left
+    lv_arc_set_bg_angles(ram_arc, 0, 270);  // 270° sweep
+    lv_arc_set_angles(ram_arc, 0, 0);  // Start at 0%
+    lv_obj_remove_style(ram_arc, NULL, LV_PART_KNOB);  // Remove knob
+    lv_obj_clear_flag(ram_arc, LV_OBJ_FLAG_CLICKABLE);  // Not clickable
+
+    // RAM arc background (track)
+    lv_obj_set_style_arc_color(ram_arc, COLOR_ARC_BACKGROUND, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(ram_arc, 14, LV_PART_MAIN);
+
+    // RAM arc indicator
+    lv_obj_set_style_arc_color(ram_arc, COLOR_RAM_ARC, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(ram_arc, 14, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(ram_arc, true, LV_PART_INDICATOR);  // Rounded ends
+
+    // Center label - "P3300 %"
+    // center_label = lv_label_create(screen);
+    // lv_label_set_text(center_label, "User PC");
+    // lv_obj_set_style_text_font(center_label, &lv_font_montserrat_20, 0);
+    // lv_obj_set_style_text_color(center_label, COLOR_GRAYISH_WHITE, 0);
+    // lv_obj_set_style_text_align(center_label, LV_TEXT_ALIGN_CENTER, 0);
+    // lv_obj_center(center_label);
+
+    // CPU Legend container
+    lv_obj_t* cpu_legend = lv_obj_create(screen);
+    lv_obj_remove_style_all(cpu_legend);
+    lv_obj_set_size(cpu_legend, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(cpu_legend, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(cpu_legend, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_gap(cpu_legend, 5, 0);
+    lv_obj_align(cpu_legend, LV_ALIGN_BOTTOM_MID, 0, -32);
+
+    lv_obj_t* cpu_dot = lv_obj_create(cpu_legend);
+    lv_obj_remove_style_all(cpu_dot);
+    lv_obj_set_size(cpu_dot, 8, 8);
+    lv_obj_set_style_radius(cpu_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(cpu_dot, COLOR_CPU_ARC, 0);
+    lv_obj_set_style_bg_opa(cpu_dot, LV_OPA_COVER, 0);
+
+    lv_obj_t* cpu_label = lv_label_create(cpu_legend);
+    lv_label_set_text(cpu_label, "CPU");
+    lv_obj_set_style_text_font(cpu_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(cpu_label, COLOR_GRAYISH_WHITE, 0);
+
+    // RAM Legend container
+    lv_obj_t* ram_legend = lv_obj_create(screen);
+    lv_obj_remove_style_all(ram_legend);
+    lv_obj_set_size(ram_legend, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(ram_legend, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(ram_legend, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_gap(ram_legend, 5, 0);
+    lv_obj_align(ram_legend, LV_ALIGN_BOTTOM_MID, 0, -52);
+
+    lv_obj_t* ram_dot = lv_obj_create(ram_legend);
+    lv_obj_remove_style_all(ram_dot);
+    lv_obj_set_size(ram_dot, 8, 8);
+    lv_obj_set_style_radius(ram_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(ram_dot, COLOR_RAM_ARC, 0);
+    lv_obj_set_style_bg_opa(ram_dot, LV_OPA_COVER, 0);
+
+    lv_obj_t* ram_label = lv_label_create(ram_legend);
+    lv_label_set_text(ram_label, "RAM");
+    lv_obj_set_style_text_font(ram_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(ram_label, COLOR_GRAYISH_WHITE, 0);
+
+    // Battery icon at bottom (mock)
+    lv_obj_t* battery_body = lv_obj_create(screen);
+    lv_obj_remove_style_all(battery_body);
+    lv_obj_set_size(battery_body, 30, 16);
+    lv_obj_set_style_radius(battery_body, 2, 0);
+    lv_obj_set_style_border_color(battery_body, COLOR_GRAYISH_WHITE, 0);
+    lv_obj_set_style_border_width(battery_body, 2, 0);
+    lv_obj_align(battery_body, LV_ALIGN_BOTTOM_MID, -15, -10);
+
+    // Battery terminal
+    lv_obj_t* battery_terminal = lv_obj_create(screen);
+    lv_obj_remove_style_all(battery_terminal);
+    lv_obj_set_size(battery_terminal, 3, 8);
+    lv_obj_set_style_bg_color(battery_terminal, COLOR_GRAYISH_WHITE, 0);
+    lv_obj_set_style_bg_opa(battery_terminal, LV_OPA_COVER, 0);
+    lv_obj_align_to(battery_terminal, battery_body, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+
+    // Battery fill (85% mock)
+    lv_obj_t* battery_fill = lv_obj_create(battery_body);
+    lv_obj_remove_style_all(battery_fill);
+    lv_obj_set_size(battery_fill, 22, 10);  // 85% of ~26px inner width
+    lv_obj_set_style_bg_color(battery_fill, COLOR_CHECKMARK, 0);
+    lv_obj_set_style_bg_opa(battery_fill, LV_OPA_COVER, 0);
+    lv_obj_align(battery_fill, LV_ALIGN_LEFT_MID, 2, 0);
+
+    // Battery percentage label
+    lv_obj_t* battery_label = lv_label_create(screen);
+    lv_label_set_text(battery_label, "85%");
+    lv_obj_set_style_text_font(battery_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(battery_label, COLOR_GRAYISH_WHITE, 0);
+    lv_obj_align_to(battery_label, battery_body, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+
+    return screen;
+}
+
+void update_metrics_animation(lv_timer_t* timer) {
+    const float SMOOTHING = 0.15f;  // Adjust for smoother/faster animation
+
+    // Smooth interpolation
+    current_cpu_percent += (target_cpu_percent - current_cpu_percent) * SMOOTHING;
+    current_ram_percent += (target_ram_percent - current_ram_percent) * SMOOTHING;
+
+    // Update arc angles (0-270°)
+    if (cpu_arc != NULL) {
+        lv_arc_set_angles(cpu_arc, 0, (int)(current_cpu_percent * 2.7f));
+    }
+    if (ram_arc != NULL) {
+        lv_arc_set_angles(ram_arc, 0, (int)(current_ram_percent * 2.7f));
+    }
+}
+
 // =============================================================================
 // MQTT callback for power events
 // =============================================================================
@@ -330,13 +492,37 @@ void onPowerEvent(const char* topic, const char* payload) {
         newStatus = STATUS_UNKNOWN;
     }
 
+    // Screen switching logic - metrics screen used for Awake status
     if (newStatus != current_status) {
         current_status = newStatus;
-        lv_scr_load(screens[current_status]);
+
+        // Use metrics screen for AWAKE status, regular screens for others
+        if (current_status == STATUS_AWAKE) {
+            lv_scr_load(metrics_screen);
+        } else {
+            lv_scr_load(screens[current_status]);
+        }
+
         Serial0.printf("Switched to: %s\n",
             current_status == STATUS_OFF ? "OFF" :
             current_status == STATUS_STANDBY ? "Standby" :
-            current_status == STATUS_AWAKE ? "Awake" : "Unknown");
+            current_status == STATUS_AWAKE ? "Awake (Metrics)" : "Unknown");
+    }
+}
+
+void onSystemMetrics(const char* topic, const char* payload) {
+    JsonDocument doc;
+    if (deserializeJson(doc, payload) != DeserializationError::Ok) {
+        Serial0.println("Failed to parse system-metrics JSON");
+        return;
+    }
+
+    if (doc.containsKey("CpuPercent") && doc.containsKey("RamPercent")) {
+        target_cpu_percent = constrain((float)doc["CpuPercent"], 0.0f, 100.0f);
+        target_ram_percent = constrain((float)doc["RamPercent"], 0.0f, 100.0f);
+
+        Serial0.printf("Metrics: CPU=%.1f%% RAM=%.1f%%\n",
+            target_cpu_percent, target_ram_percent);
     }
 }
 
@@ -355,9 +541,10 @@ void setup_status_screens() {
     screens[STATUS_STANDBY] = create_status_screen(STATUS_STANDBY);
     Serial0.printf("STANDBY screen created: %p\n", screens[STATUS_STANDBY]);
 
-    Serial0.println("Creating AWAKE screen...");
-    screens[STATUS_AWAKE] = create_status_screen(STATUS_AWAKE);
-    Serial0.printf("AWAKE screen created: %p\n", screens[STATUS_AWAKE]);
+    // AWAKE screen replaced by metrics screen
+    // Serial0.println("Creating AWAKE screen...");
+    // screens[STATUS_AWAKE] = create_status_screen(STATUS_AWAKE);
+    // Serial0.printf("AWAKE screen created: %p\n", screens[STATUS_AWAKE]);
 
     Serial0.println("Creating UNKNOWN screen...");
     screens[STATUS_UNKNOWN] = create_status_screen(STATUS_UNKNOWN);
@@ -416,14 +603,22 @@ void setup() {
   Serial0.println("Connecting to MQTT broker...");
   mqtt.connect();
   mqtt.subscribe(MQTT_TOPIC, onPowerEvent);
+  mqtt.subscribe("system-metrics", onSystemMetrics);
   Serial0.println("MQTT connected and subscribed!");
 
-  // Setup power status UI screens
+  // Setup status screens (OFF, STANDBY, UNKNOWN)
   setup_status_screens();
 
-  // Set default status
+  // Create metrics screen (used for AWAKE status)
+  Serial0.println("Creating metrics screen...");
+  metrics_screen = create_metrics_screen();
+
+  // Start with UNKNOWN screen
   current_status = STATUS_UNKNOWN;
   lv_scr_load(screens[current_status]);
+
+  // Start animation timer (33ms = ~30 FPS)
+  lv_timer_create(update_metrics_animation, 33, NULL);
 
   Serial0.println("\n=== Setup complete! ===");
   Serial0.println("Listening for power events on MQTT topic: " MQTT_TOPIC);

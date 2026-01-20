@@ -3,8 +3,7 @@
 MqttClient* MqttClient::_instance = nullptr;
 
 MqttClient::MqttClient(const char* broker, uint16_t port)
-  : _mqttClient(_wifiClient), _broker(broker), _port(port),
-    _subscribeTopic(nullptr), _userCallback(nullptr) {
+  : _mqttClient(_wifiClient), _broker(broker), _port(port) {
   _instance = this;
 }
 
@@ -15,8 +14,7 @@ void MqttClient::connect() {
 }
 
 void MqttClient::subscribe(const char* topic, MqttMessageCallback callback) {
-  _subscribeTopic = topic;
-  _userCallback = callback;
+  _subscriptions.push_back({String(topic), callback});
   if (_mqttClient.connected()) {
     _mqttClient.subscribe(topic);
   }
@@ -38,8 +36,8 @@ void MqttClient::reconnect() {
     String clientId = "ESP32-" + String(random(0xffff), HEX);
 
     if (_mqttClient.connect(clientId.c_str())) {
-      if (_subscribeTopic != nullptr) {
-        _mqttClient.subscribe(_subscribeTopic);
+      for (auto& sub : _subscriptions) {
+        _mqttClient.subscribe(sub.topic.c_str());
       }
     } else {
       delay(2000);
@@ -50,13 +48,18 @@ void MqttClient::reconnect() {
 void MqttClient::mqttCallback(char* topic, byte* payload, unsigned int length) {
   Serial0.printf("MQTT received on topic: %s\n", topic);
 
-  if (_instance != nullptr && _instance->_userCallback != nullptr) {
+  if (_instance != nullptr) {
     char message[length + 1];
     memcpy(message, payload, length);
     message[length] = '\0';
 
-    Serial0.printf("Payload: %s\n", message);
-
-    _instance->_userCallback(topic, message);
+    // Find matching subscription
+    for (auto& sub : _instance->_subscriptions) {
+      if (strcmp(topic, sub.topic.c_str()) == 0 && sub.callback != nullptr) {
+        Serial0.printf("Payload: %s\n", message);
+        sub.callback(topic, message);
+        return;
+      }
+    }
   }
 }
