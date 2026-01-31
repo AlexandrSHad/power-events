@@ -1,12 +1,16 @@
 {
 	"folders": [
 		{
-			"name": ".build",
-			"path": ".build"
-		},
-		{
 			"name": ".design",
 			"path": ".design"
+		},
+		{
+			"name": ".claude",
+			"path": ".claude"
+		},
+		{
+			"name": ".build",
+			"path": ".build"
 		},
 		{
 			"name": "backend",
@@ -29,6 +33,7 @@
 			"path": "windows-events-listener"
 		},
 		{
+			"name": "windows-service",
 			"path": "windows-service"
 		}
 	],
