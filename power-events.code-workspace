@@ -9,6 +9,10 @@
 			"path": ".claude"
 		},
 		{
+			"name": ".specs",
+			"path": ".specs"
+		},
+		{
 			"name": ".build",
 			"path": ".build"
 		},
