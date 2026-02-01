@@ -56,16 +56,43 @@ Pre-configured queries for common troubleshooting:
 | Query | Purpose |
 |-------|---------|
 | `CorrelationId = "..."` | Trace single event flow |
+| `CorrelationId = "..." and Application in [...]` | Trace correlationId across all components |
 | `@Level = "Error"` | All errors |
 | `Application = "PowerEvents.WindowsService"` | Windows Service logs |
 | `Component = "MqttSubscriberService"` | MQTT-related logs |
+| `Topic = "system-metrics"` | System metrics logs (CPU/RAM) |
 | `device = "esp32-display"` | ESP32 display logs |
 
-## Retention Policy
+## Backup & Retention
 
-- Default: 7 days
-- Configurable via Seq settings
-- Consider storage implications for high-volume scenarios
+| Component | Retention |
+|-----------|-----------|
+| Windows Service file logs | 2 days |
+| Seq default | 7 days (configurable) |
+
+### Seq Retention Policy Configuration
+
+Configure retention via Seq Admin UI or API:
+
+```json
+{
+  "retentionPolicy": {
+    "retentionTime": "7.00:00:00",
+    "deleteOnlyWhenSpaceNeeded": false,
+    "minimumFreeSpaceBytes": 1073741824
+  }
+}
+```
+
+Alternatively, set via environment variables:
+
+```yaml
+environment:
+  - SEQ_RETENTION_RETENTIONPERIOD=7.00:00:00
+  - SEQ_STORAGE_MINIMUMFREESPACEBYTES=1073741824
+```
+
+Consider storage implications for high-volume scenarios.
 
 ## Dashboards
 

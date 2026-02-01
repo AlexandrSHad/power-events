@@ -1,8 +1,19 @@
 # Phase 3: Web Client Structured Logging
 
+## Dependencies
+
+- **Phase 2 Required**: This phase requires the `/api/logs` endpoint from Phase 2 (Backend Structured Logging) to be implemented first for log forwarding to work.
+
 ## Overview
 
 Implement structured logging for the Vue 3 web client with optional backend log forwarding.
+
+## Breaking Changes
+
+- SSE event payload field names change from PascalCase to camelCase:
+  - `State` → `state`
+  - `TimeGenerated` → `timeGenerated`
+  - `CorrelationId` → `correlationId`
 
 ## Scope
 
@@ -10,6 +21,14 @@ Implement structured logging for the Vue 3 web client with optional backend log 
 - Extract correlation ID from SSE events
 - Log SSE connection lifecycle and received events
 - Optional: Forward logs to backend endpoint for Seq ingestion
+
+## File Changes
+
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `composables/useLogger.js` | New | Structured logging composable |
+| `composables/useEventSource.js` | Modify | Extract correlationId from events |
+| `.env.example` | Update | Add VITE_LOG_ENDPOINT |
 
 ## Key Components
 
@@ -43,6 +62,24 @@ export function useLogger(component) {
     error: (msg, ctx) => log('error', msg, ctx)
   };
 }
+```
+
+### SSE Event Handling with Correlation ID
+
+```javascript
+// composables/useEventSource.js
+const handleEvent = (event) => {
+  const data = JSON.parse(event.data);
+  const { correlationId, state, timeGenerated } = data;
+
+  logger.info('Power event received', {
+    correlationId,
+    state,
+    timeGenerated
+  });
+
+  // Process event...
+};
 ```
 
 ### Log Points

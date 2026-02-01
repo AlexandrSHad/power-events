@@ -80,7 +80,7 @@ Log.Logger = new LoggerConfiguration()
         wt => wt.File(
             path: logFilePath,
             rollingInterval: RollingInterval.Day,
-            retainedFileCountLimit: 7,
+            retainedFileCountLimit: 2,
             formatter: new CompactJsonFormatter()))
     .WriteTo.Conditional(
         _ => !Environment.UserInteractive,
@@ -134,26 +134,7 @@ public class PowerEventsBackgroundService : BackgroundService
 
 ### MQTT Payload Schema Update
 
-**Before**:
-```json
-{
-  "State": "Awake",
-  "TimeGenerated": "2026-01-20T10:15:30Z"
-}
-```
-
-**After**:
-```json
-{
-  "correlationId": "550e8400-e29b-41d4-a716-446655440000",
-  "state": "Awake",
-  "timeGenerated": "2026-01-20T10:15:30Z",
-  "source": {
-    "machine": "DESKTOP-ABC123",
-    "service": "PowerEvents.WindowsService"
-  }
-}
-```
+This must be discussed once again. Probably CorrelationId and Timestamp already exist in MQTT message metadata or there is a way enabling that.
 
 ### Structured Log Points
 
@@ -163,7 +144,7 @@ Replace string interpolation with structured properties:
 |---------|---------|
 | `$"Connected to MQTT at {host}:{port}"` | `"Connected to MQTT broker at {Host}:{Port}", host, port` |
 | `$"Published to {topic}"` | `"Published message to MQTT topic {Topic}", topic` |
-| `$"CPU {cpu}%, RAM {ram}%"` | `"System metrics collected: CPU={CpuPercent}%, RAM={RamPercent}%", cpu, ram` |
+| `$"CPU {cpu}%, RAM {ram}%"` | `"System metrics collected: CPU={CpuPercent}%, RAM={RamPercent}%, CorrelationId={CorrelationId}", cpu, ram, correlationId` |
 
 ### Error Handling
 
@@ -196,6 +177,18 @@ catch (Exception ex)
    - Errors appear in Windows Event Viewer
 3. **Seq Integration**: Enable Seq → verify logs appear in Seq UI with correlation IDs
 4. **Correlation Flow**: Trigger power event → verify same correlationId in MQTT payload
+
+## Breaking Changes
+
+The MQTT payload schema changes from PascalCase to camelCase property naming. This affects all downstream consumers:
+
+| Consumer | Required Update |
+|----------|-----------------|
+| **Backend** | Update SSE payload mapping to expect camelCase properties (`state`, `timeGenerated`, `cpuPercent`, `ramPercent`) |
+| **ESP32** | Update ArduinoJson deserialization keys to camelCase |
+| **Web Client** | Update JavaScript/Vue property access to camelCase (may already be compatible if using JSON.parse) |
+
+**Migration**: All consumers must be updated before deploying the Windows Service changes to avoid parsing failures.
 
 ## Open Source Considerations
 
