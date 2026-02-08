@@ -5,6 +5,7 @@ MqttClient* MqttClient::_instance = nullptr;
 MqttClient::MqttClient(const char* broker, uint16_t port)
   : _mqttClient(_wifiClient), _broker(broker), _port(port) {
   _instance = this;
+  _mqttClient.setBufferSize(512);
 }
 
 void MqttClient::connect() {

@@ -35,6 +35,7 @@
   #define LV_LOG_PRINTF 1
 #endif
 
+#define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_MONTSERRAT_20 1
 #define LV_FONT_MONTSERRAT_48 1
 

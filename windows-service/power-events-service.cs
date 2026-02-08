@@ -4,8 +4,11 @@
 #:package MQTTnet@5.0.1.1416
 #:package Microsoft.Extensions.Hosting.WindowsServices@8.0.0
 #:package Hardware.Info@101.1.0.1
+#:package LibreHardwareMonitorLib@0.9.6-pre625
+#:package System.Management@10.0.2
 
 using System.Diagnostics;
+using System.Management;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -13,9 +16,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
+using LibreHardwareMonitor.Hardware;
 
 var host = Host.CreateDefaultBuilder(args)
-    .UseWindowsService()
+    .UseWindowsService(o => o.ServiceName = "PowerEvents")
     .ConfigureServices(services =>
     {
         services.AddSingleton<MqttPublisher>();
@@ -38,7 +42,7 @@ internal sealed class PowerEventsBackgroundService(MqttPublisher mqttPublisher) 
         await mqttPublisher.ConnectAsync(stoppingToken);
         await mqttPublisher.PublishAsync(
             "power-events",
-            new PowerEventData { State = "EMQX Working", TimeGenerated = DateTime.Now },
+            new PowerEventData { State = "Awake", TimeGenerated = DateTime.Now },
             SourceGenerationContext.Default.PowerEventData,
             stoppingToken);
 
@@ -116,28 +120,99 @@ internal sealed class SystemMetricsBackgroundService(MqttPublisher mqttPublisher
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var hardwareInfo = new Hardware.Info.HardwareInfo();
+        var computer = new Computer
+        {
+            IsCpuEnabled = true,
+            IsGpuEnabled = true,
+            IsMotherboardEnabled = true
+        };
 
         try
         {
+            computer.Open();
+            var visitor = new UpdateVisitor();
+
+            // One-time diagnostic: log all detected hardware and temperature sensors
+            computer.Accept(visitor);
+            foreach (var hw in computer.Hardware)
+            {
+                logger.LogInformation("Detected hardware: {Type} - {Name}", hw.HardwareType, hw.Name);
+                foreach (var s in hw.Sensors.Where(s => s.SensorType == SensorType.Temperature))
+                    logger.LogInformation("  Sensor: {Name} = {Value}°C", s.Name, s.Value);
+                foreach (var sub in hw.SubHardware)
+                {
+                    logger.LogInformation("  Sub-hardware: {Type} - {Name}", sub.HardwareType, sub.Name);
+                    foreach (var s in sub.Sensors.Where(s => s.SensorType == SensorType.Temperature))
+                        logger.LogInformation("    Sensor: {Name} = {Value}°C", s.Name, s.Value);
+                }
+            }
+
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
                     hardwareInfo.RefreshCPUList();
                     hardwareInfo.RefreshMemoryStatus();
+                    hardwareInfo.RefreshBatteryList();
 
-                    var cpuPercent = hardwareInfo.CpuList[0].PercentProcessorTime;
+                    var cpuPercent = hardwareInfo.CpuList.Average(cpu => (double)cpu.PercentProcessorTime);
                     var memoryPercent = Math.Round((hardwareInfo.MemoryStatus.TotalPhysical - hardwareInfo.MemoryStatus.AvailablePhysical)
                         / (double)hardwareInfo.MemoryStatus.TotalPhysical * 100);
+
+                    // Collect temperatures
+                    computer.Accept(visitor);
+
+                    double? cpuTemp = null;
+                    double? gpuTemp = null;
+
+                    foreach (var hardware in computer.Hardware)
+                    {
+                        if (hardware.HardwareType == HardwareType.Cpu)
+                        {
+                            cpuTemp = hardware.FindTemperature("Package", "Tctl", "Tdie", "Core (Tctl/Tdie)");
+                        }
+
+                        if (hardware.HardwareType is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel)
+                        {
+                            gpuTemp = hardware.FindTemperature("Core");
+                        }
+
+                        // Motherboard Super I/O chips often report CPU temperature on AMD systems
+                        // where direct CPU SMU access fails
+                        if (cpuTemp is null && hardware.HardwareType == HardwareType.Motherboard)
+                        {
+                            cpuTemp = hardware.FindTemperature("CPU");
+                        }
+                    }
+
+                    // WMI fallback (returns stale ACPI value on some systems, used as last resort)
+                    cpuTemp ??= WmiTemperatureReader.GetCpuTemperature();
+
+                    // Collect battery info
+                    double? batteryPercent = null;
+                    bool? batteryCharging = null;
+
+                    if (hardwareInfo.BatteryList.Count > 0)
+                    {
+                        var battery = hardwareInfo.BatteryList[0];
+                        batteryPercent = battery.EstimatedChargeRemaining;
+                        batteryCharging = battery.BatteryStatusDescription?.Contains("Charging", StringComparison.OrdinalIgnoreCase);
+                    }
 
                     var metricsData = new SystemMetricsData
                     {
                         CpuPercent = cpuPercent,
                         RamPercent = memoryPercent,
+                        CpuTempCelsius = cpuTemp.HasValue ? Math.Round(cpuTemp.Value) : null,
+                        GpuTempCelsius = gpuTemp.HasValue ? Math.Round(gpuTemp.Value) : null,
+                        BatteryPercent = batteryPercent,
+                        BatteryCharging = batteryCharging,
                         Timestamp = DateTime.Now
                     };
 
-                    logger.LogInformation("Collected system metrics: CPU {CpuPercent}%, RAM {RamPercent}%", cpuPercent, memoryPercent);
+                    logger.LogInformation(
+                        "Collected system metrics: CPU {CpuPercent}%, RAM {RamPercent}%, CPU Temp {CpuTemp}°C, GPU Temp {GpuTemp}°C, Battery {BatteryPercent}% (Charging: {BatteryCharging})",
+                        cpuPercent, memoryPercent, cpuTemp, gpuTemp, batteryPercent, batteryCharging);
                     await mqttPublisher.PublishAsync("system-metrics", metricsData, SourceGenerationContext.Default.SystemMetricsData, stoppingToken);
                 }
                 catch (Exception ex)
@@ -152,6 +227,10 @@ internal sealed class SystemMetricsBackgroundService(MqttPublisher mqttPublisher
         {
             // expected on shutdown
         }
+        finally
+        {
+            computer.Close();
+        }
     }
 }
 
@@ -165,6 +244,10 @@ internal sealed class SystemMetricsData
 {
     public required double CpuPercent { get; set; }
     public required double RamPercent { get; set; }
+    public double? CpuTempCelsius { get; set; }
+    public double? GpuTempCelsius { get; set; }
+    public double? BatteryPercent { get; set; }
+    public bool? BatteryCharging { get; set; }
     public required DateTime Timestamp { get; set; }
 }
 
@@ -172,6 +255,93 @@ internal sealed class SystemMetricsData
 [JsonSerializable(typeof(PowerEventData))]
 [JsonSerializable(typeof(SystemMetricsData))]
 internal partial class SourceGenerationContext : JsonSerializerContext { }
+
+internal static class WmiTemperatureReader
+{
+    /// <summary>
+    /// Reads CPU temperature via WMI MSAcpi_ThermalZoneTemperature.
+    /// Returns temperature in Celsius, or null if unavailable.
+    /// </summary>
+    public static double? GetCpuTemperature()
+    {
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                @"root\WMI",
+                "SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
+
+            foreach (ManagementObject obj in searcher.Get())
+            {
+                var tempCelsius = (Convert.ToDouble(obj["CurrentTemperature"]) / 10.0) - 273.15;
+                if (tempCelsius is > 0 and < 150)
+                    return Math.Round(tempCelsius);
+            }
+        }
+        catch
+        {
+            // WMI thermal zone not available on this system
+        }
+
+        return null;
+    }
+}
+
+internal static class HardwareSensorExtensions
+{
+    /// <summary>
+    /// Searches hardware and all sub-hardware for a valid temperature sensor.
+    /// Prefers sensors matching any of <paramref name="preferredNames"/>, falls back to first valid reading.
+    /// Ignores readings of 0°C as they indicate unreadable sensors.
+    /// </summary>
+    public static double? FindTemperature(this IHardware hardware, params string[] preferredNames)
+    {
+        double? fallback = null;
+
+        foreach (var sensor in AllTemperatureSensors(hardware))
+        {
+            if (sensor.Value is > 0)
+            {
+                if (preferredNames.Any(name => sensor.Name.Contains(name, StringComparison.OrdinalIgnoreCase)))
+                    return sensor.Value;
+                fallback ??= sensor.Value;
+            }
+        }
+
+        return fallback;
+    }
+
+    private static IEnumerable<ISensor> AllTemperatureSensors(IHardware hardware)
+    {
+        foreach (var sensor in hardware.Sensors)
+            if (sensor.SensorType == SensorType.Temperature)
+                yield return sensor;
+
+        foreach (var sub in hardware.SubHardware)
+            foreach (var sensor in sub.Sensors)
+                if (sensor.SensorType == SensorType.Temperature)
+                    yield return sensor;
+    }
+}
+
+internal sealed class UpdateVisitor : IVisitor
+{
+    public void VisitComputer(IComputer computer)
+    {
+        computer.Traverse(this);
+    }
+
+    public void VisitHardware(IHardware hardware)
+    {
+        hardware.Update();
+        foreach (var subHardware in hardware.SubHardware)
+        {
+            subHardware.Accept(this);
+        }
+    }
+
+    public void VisitSensor(ISensor sensor) { }
+    public void VisitParameter(IParameter parameter) { }
+}
 
 internal sealed class MqttPublisher(ILogger<MqttPublisher> logger)
 {

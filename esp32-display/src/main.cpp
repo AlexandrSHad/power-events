@@ -37,6 +37,7 @@
 #define COLOR_CPU_ARC          COLOR_CHECKMARK
 #define COLOR_RAM_ARC          lv_color_hex(0x00D4FF)  // Cyan
 #define COLOR_ARC_BACKGROUND   lv_color_hex(0x2A2A2A)  // Dark gray track
+#define COLOR_GPU_TEMP         lv_color_hex(0xFF6D00)  // Orange for GPU temp
 
 // =============================================================================
 // Layout Constants
@@ -72,6 +73,27 @@ static lv_obj_t* metrics_screen = NULL;
 static lv_obj_t* cpu_arc = NULL;
 static lv_obj_t* ram_arc = NULL;
 static lv_obj_t* center_label = NULL;
+
+// Temperature data
+static float target_cpu_temp = 0.0f;
+static float current_cpu_temp = 0.0f;
+static float target_gpu_temp = 0.0f;
+static float current_gpu_temp = 0.0f;
+static bool cpu_temp_received = false;
+static bool gpu_temp_received = false;
+
+// Battery data
+static float target_battery_percent = 0.0f;
+static float current_battery_percent = 0.0f;
+static bool battery_charging = false;
+static bool battery_data_received = false;
+
+// Temperature and battery UI elements
+static lv_obj_t* cpu_temp_label = NULL;
+static lv_obj_t* gpu_temp_label = NULL;
+static lv_obj_t* battery_fill_obj = NULL;
+static lv_obj_t* battery_pct_label = NULL;
+static lv_obj_t* battery_body_obj = NULL;
 
 // WiFi and MQTT
 WiFiConnection wifi("ESP32-Display-setup", RGB_LED_PIN);
@@ -362,13 +384,19 @@ lv_obj_t* create_metrics_screen() {
     lv_obj_set_style_arc_width(ram_arc, 14, LV_PART_INDICATOR);
     lv_obj_set_style_arc_rounded(ram_arc, true, LV_PART_INDICATOR);  // Rounded ends
 
-    // Center label - "P3300 %"
-    // center_label = lv_label_create(screen);
-    // lv_label_set_text(center_label, "User PC");
-    // lv_obj_set_style_text_font(center_label, &lv_font_montserrat_20, 0);
-    // lv_obj_set_style_text_color(center_label, COLOR_GRAYISH_WHITE, 0);
-    // lv_obj_set_style_text_align(center_label, LV_TEXT_ALIGN_CENTER, 0);
-    // lv_obj_center(center_label);
+    // CPU Temperature label (left of center)
+    cpu_temp_label = lv_label_create(screen);
+    lv_label_set_text(cpu_temp_label, "--°");
+    lv_obj_set_style_text_font(cpu_temp_label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(cpu_temp_label, COLOR_CPU_ARC, 0);
+    lv_obj_align(cpu_temp_label, LV_ALIGN_CENTER, -28, 0);
+
+    // GPU Temperature label (right of center)
+    gpu_temp_label = lv_label_create(screen);
+    lv_label_set_text(gpu_temp_label, "--°");
+    lv_obj_set_style_text_font(gpu_temp_label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(gpu_temp_label, COLOR_GPU_TEMP, 0);
+    lv_obj_align(gpu_temp_label, LV_ALIGN_CENTER, 28, 0);
 
     // CPU Legend container
     lv_obj_t* cpu_legend = lv_obj_create(screen);
@@ -412,14 +440,14 @@ lv_obj_t* create_metrics_screen() {
     lv_obj_set_style_text_font(ram_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(ram_label, COLOR_GRAYISH_WHITE, 0);
 
-    // Battery icon at bottom (mock)
-    lv_obj_t* battery_body = lv_obj_create(screen);
-    lv_obj_remove_style_all(battery_body);
-    lv_obj_set_size(battery_body, 30, 16);
-    lv_obj_set_style_radius(battery_body, 2, 0);
-    lv_obj_set_style_border_color(battery_body, COLOR_GRAYISH_WHITE, 0);
-    lv_obj_set_style_border_width(battery_body, 2, 0);
-    lv_obj_align(battery_body, LV_ALIGN_BOTTOM_MID, -15, -10);
+    // Battery icon at bottom (dynamic)
+    battery_body_obj = lv_obj_create(screen);
+    lv_obj_remove_style_all(battery_body_obj);
+    lv_obj_set_size(battery_body_obj, 30, 16);
+    lv_obj_set_style_radius(battery_body_obj, 2, 0);
+    lv_obj_set_style_border_color(battery_body_obj, COLOR_GRAYISH_WHITE, 0);
+    lv_obj_set_style_border_width(battery_body_obj, 2, 0);
+    lv_obj_align(battery_body_obj, LV_ALIGN_BOTTOM_MID, -15, -10);
 
     // Battery terminal
     lv_obj_t* battery_terminal = lv_obj_create(screen);
@@ -427,32 +455,41 @@ lv_obj_t* create_metrics_screen() {
     lv_obj_set_size(battery_terminal, 3, 8);
     lv_obj_set_style_bg_color(battery_terminal, COLOR_GRAYISH_WHITE, 0);
     lv_obj_set_style_bg_opa(battery_terminal, LV_OPA_COVER, 0);
-    lv_obj_align_to(battery_terminal, battery_body, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+    lv_obj_align_to(battery_terminal, battery_body_obj, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
 
-    // Battery fill (85% mock)
-    lv_obj_t* battery_fill = lv_obj_create(battery_body);
-    lv_obj_remove_style_all(battery_fill);
-    lv_obj_set_size(battery_fill, 22, 10);  // 85% of ~26px inner width
-    lv_obj_set_style_bg_color(battery_fill, COLOR_CHECKMARK, 0);
-    lv_obj_set_style_bg_opa(battery_fill, LV_OPA_COVER, 0);
-    lv_obj_align(battery_fill, LV_ALIGN_LEFT_MID, 2, 0);
+    // Battery fill (dynamic)
+    battery_fill_obj = lv_obj_create(battery_body_obj);
+    lv_obj_remove_style_all(battery_fill_obj);
+    lv_obj_set_size(battery_fill_obj, 0, 10);  // Start at 0, updated dynamically
+    lv_obj_set_style_bg_color(battery_fill_obj, COLOR_CHECKMARK, 0);
+    lv_obj_set_style_bg_opa(battery_fill_obj, LV_OPA_COVER, 0);
+    lv_obj_align(battery_fill_obj, LV_ALIGN_LEFT_MID, 2, 0);
 
     // Battery percentage label
-    lv_obj_t* battery_label = lv_label_create(screen);
-    lv_label_set_text(battery_label, "85%");
-    lv_obj_set_style_text_font(battery_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(battery_label, COLOR_GRAYISH_WHITE, 0);
-    lv_obj_align_to(battery_label, battery_body, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+    battery_pct_label = lv_label_create(screen);
+    lv_label_set_text(battery_pct_label, "--");
+    lv_obj_set_style_text_font(battery_pct_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(battery_pct_label, COLOR_GRAYISH_WHITE, 0);
+    lv_obj_align_to(battery_pct_label, battery_body_obj, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
 
     return screen;
 }
 
 void update_metrics_animation(lv_timer_t* timer) {
     const float SMOOTHING = 0.15f;  // Adjust for smoother/faster animation
+    const float TEMP_SMOOTHING = 0.3f;  // Faster for temperatures
+    const float BATTERY_SMOOTHING = 0.1f;  // Slower for battery
 
-    // Smooth interpolation
+    // Smooth interpolation - arcs
     current_cpu_percent += (target_cpu_percent - current_cpu_percent) * SMOOTHING;
     current_ram_percent += (target_ram_percent - current_ram_percent) * SMOOTHING;
+
+    // Smooth interpolation - temperatures
+    current_cpu_temp += (target_cpu_temp - current_cpu_temp) * TEMP_SMOOTHING;
+    current_gpu_temp += (target_gpu_temp - current_gpu_temp) * TEMP_SMOOTHING;
+
+    // Smooth interpolation - battery
+    current_battery_percent += (target_battery_percent - current_battery_percent) * BATTERY_SMOOTHING;
 
     // Update arc angles (0-270°)
     if (cpu_arc != NULL) {
@@ -460,6 +497,46 @@ void update_metrics_animation(lv_timer_t* timer) {
     }
     if (ram_arc != NULL) {
         lv_arc_set_angles(ram_arc, 0, (int)(current_ram_percent * 2.7f));
+    }
+
+    // Update temperature labels
+    if (cpu_temp_label != NULL && cpu_temp_received) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d°", (int)current_cpu_temp);
+        lv_label_set_text(cpu_temp_label, buf);
+    }
+    if (gpu_temp_label != NULL && gpu_temp_received) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d°", (int)current_gpu_temp);
+        lv_label_set_text(gpu_temp_label, buf);
+    }
+
+    // Update battery
+    if (battery_fill_obj != NULL && battery_data_received) {
+        int fill_width = (int)(current_battery_percent / 100.0f * 26.0f);
+        if (fill_width < 0) fill_width = 0;
+        if (fill_width > 26) fill_width = 26;
+        lv_obj_set_width(battery_fill_obj, fill_width);
+
+        // Color coding: green when charging or >20%, amber 10-20%, red <10%
+        lv_color_t fill_color;
+        if (battery_charging) {
+            fill_color = COLOR_CHECKMARK;  // Always green when charging
+        } else if (current_battery_percent > 20.0f) {
+            fill_color = COLOR_CHECKMARK;  // Green
+        } else if (current_battery_percent > 10.0f) {
+            fill_color = COLOR_QUESTION_MARK;  // Amber
+        } else {
+            fill_color = lv_color_hex(0xFF0000);  // Red
+        }
+        lv_obj_set_style_bg_color(battery_fill_obj, fill_color, 0);
+
+        // Update percentage label
+        if (battery_pct_label != NULL) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%d%%", (int)current_battery_percent);
+            lv_label_set_text(battery_pct_label, buf);
+        }
     }
 }
 
@@ -523,6 +600,29 @@ void onSystemMetrics(const char* topic, const char* payload) {
 
         Serial0.printf("Metrics: CPU=%.1f%% RAM=%.1f%%\n",
             target_cpu_percent, target_ram_percent);
+    }
+
+    // Parse temperature data
+    if (!doc["CpuTempCelsius"].isNull()) {
+        target_cpu_temp = constrain((float)doc["CpuTempCelsius"], 0.0f, 150.0f);
+        cpu_temp_received = true;
+        Serial0.printf("CPU Temp: %.1f°C\n", target_cpu_temp);
+    }
+    if (!doc["GpuTempCelsius"].isNull()) {
+        target_gpu_temp = constrain((float)doc["GpuTempCelsius"], 0.0f, 150.0f);
+        gpu_temp_received = true;
+        Serial0.printf("GPU Temp: %.1f°C\n", target_gpu_temp);
+    }
+
+    // Parse battery data
+    if (!doc["BatteryPercent"].isNull()) {
+        target_battery_percent = constrain((float)doc["BatteryPercent"], 0.0f, 100.0f);
+        battery_data_received = true;
+        Serial0.printf("Battery: %.0f%%\n", target_battery_percent);
+    }
+    if (!doc["BatteryCharging"].isNull()) {
+        battery_charging = (bool)doc["BatteryCharging"];
+        Serial0.printf("Charging: %s\n", battery_charging ? "Yes" : "No");
     }
 }
 
