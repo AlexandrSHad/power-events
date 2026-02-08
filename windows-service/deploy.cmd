@@ -14,7 +14,7 @@ set BINARY=%PUBLISH_DIR%\power-events-service.exe
 echo %BINARY%
 echo Publishing service...
 REM TODO: Desktop development with C++ to support Native AOT on Windows
-dotnet publish power-events-service.cs -o %PUBLISH_DIR% -c %CONFIG% -r %RUNTIME% --self-contained false ^
+dotnet publish %PROJECT% -o %PUBLISH_DIR% -c %CONFIG% -r %RUNTIME% --self-contained false ^
  /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true /p:PublishAot=false ^
  /p:DebugSymbols=false /p:DebugType=None || exit /b 1
 

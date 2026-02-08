@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishAot>true</PublishAot>
+    <PackAsTool>true</PackAsTool>
+    <UserSecretsId>power-events-service-44cb4900c7fae5dc59282ef7bacf2effc5151775bd150194b2859e08783bd30e</UserSecretsId>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Diagnostics.EventLog" Version="10.0.1" />
+    <PackageReference Include="MQTTnet" Version="5.0.1.1416" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0" />
+    <PackageReference Include="Hardware.Info" Version="101.1.0.1" />
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6-pre625" />
+  </ItemGroup>
+
+</Project>

@@ -1,22 +1,13 @@
-#:property TargetFramework=net10.0-windows
-#:property BuiltInComInteropSupport=true
-#:package System.Diagnostics.EventLog@10.0.1
-#:package MQTTnet@5.0.1.1416
-#:package Microsoft.Extensions.Hosting.WindowsServices@8.0.0
-#:package Hardware.Info@101.1.0.1
-#:package LibreHardwareMonitorLib@0.9.6-pre625
-#:package System.Management@10.0.2
-
-using System.Diagnostics;
-using System.Management;
+﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using LibreHardwareMonitor.Hardware;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
-using LibreHardwareMonitor.Hardware;
 
 var host = Host.CreateDefaultBuilder(args)
     .UseWindowsService(o => o.ServiceName = "PowerEvents")
@@ -44,7 +35,8 @@ internal sealed class PowerEventsBackgroundService(MqttPublisher mqttPublisher) 
             "power-events",
             new PowerEventData { State = "Awake", TimeGenerated = DateTime.Now },
             SourceGenerationContext.Default.PowerEventData,
-            stoppingToken);
+            stoppingToken
+        );
 
         _eventLog = new EventLog("System");
         _eventLog.EntryWritten += OnEntryWritten;
@@ -97,7 +89,7 @@ internal sealed class PowerEventsBackgroundService(MqttPublisher mqttPublisher) 
             107 => "Awake",
             506 => "Standby",
             507 => "Awake",
-            _ => "Unknown"
+            _ => "Unknown",
         };
 
         if (state == "Unknown")
@@ -108,44 +100,42 @@ internal sealed class PowerEventsBackgroundService(MqttPublisher mqttPublisher) 
         var powerEventData = new PowerEventData
         {
             State = state,
-            TimeGenerated = e.Entry.TimeGenerated
+            TimeGenerated = e.Entry.TimeGenerated,
         };
 
-        await mqttPublisher.PublishAsync("power-events", powerEventData, SourceGenerationContext.Default.PowerEventData, _stoppingToken);
+        await mqttPublisher.PublishAsync(
+            "power-events",
+            powerEventData,
+            SourceGenerationContext.Default.PowerEventData,
+            _stoppingToken
+        );
     }
 }
 
-internal sealed class SystemMetricsBackgroundService(MqttPublisher mqttPublisher, ILogger<SystemMetricsBackgroundService> logger) : BackgroundService
+internal sealed class SystemMetricsBackgroundService(
+    MqttPublisher mqttPublisher,
+    ILogger<SystemMetricsBackgroundService> logger
+) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var hardwareInfo = new Hardware.Info.HardwareInfo();
-        var computer = new Computer
+        var computer = new Computer { IsCpuEnabled = true, IsGpuEnabled = true };
+
+        AmdAdlTemperature? amdAdl = null;
+        try
         {
-            IsCpuEnabled = true,
-            IsGpuEnabled = true,
-            IsMotherboardEnabled = true
-        };
+            amdAdl = AmdAdlTemperature.TryCreate(logger);
+        }
+        catch
+        {
+            // AMD ADL not available (no AMD GPU driver installed)
+        }
 
         try
         {
             computer.Open();
             var visitor = new UpdateVisitor();
-
-            // One-time diagnostic: log all detected hardware and temperature sensors
-            computer.Accept(visitor);
-            foreach (var hw in computer.Hardware)
-            {
-                logger.LogInformation("Detected hardware: {Type} - {Name}", hw.HardwareType, hw.Name);
-                foreach (var s in hw.Sensors.Where(s => s.SensorType == SensorType.Temperature))
-                    logger.LogInformation("  Sensor: {Name} = {Value}°C", s.Name, s.Value);
-                foreach (var sub in hw.SubHardware)
-                {
-                    logger.LogInformation("  Sub-hardware: {Type} - {Name}", sub.HardwareType, sub.Name);
-                    foreach (var s in sub.Sensors.Where(s => s.SensorType == SensorType.Temperature))
-                        logger.LogInformation("    Sensor: {Name} = {Value}°C", s.Name, s.Value);
-                }
-            }
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -155,9 +145,17 @@ internal sealed class SystemMetricsBackgroundService(MqttPublisher mqttPublisher
                     hardwareInfo.RefreshMemoryStatus();
                     hardwareInfo.RefreshBatteryList();
 
-                    var cpuPercent = hardwareInfo.CpuList.Average(cpu => (double)cpu.PercentProcessorTime);
-                    var memoryPercent = Math.Round((hardwareInfo.MemoryStatus.TotalPhysical - hardwareInfo.MemoryStatus.AvailablePhysical)
-                        / (double)hardwareInfo.MemoryStatus.TotalPhysical * 100);
+                    var cpuPercent = hardwareInfo.CpuList.Average(cpu =>
+                        (double)cpu.PercentProcessorTime
+                    );
+                    var memoryPercent = Math.Round(
+                        (
+                            hardwareInfo.MemoryStatus.TotalPhysical
+                            - hardwareInfo.MemoryStatus.AvailablePhysical
+                        )
+                            / (double)hardwareInfo.MemoryStatus.TotalPhysical
+                            * 100
+                    );
 
                     // Collect temperatures
                     computer.Accept(visitor);
@@ -169,24 +167,28 @@ internal sealed class SystemMetricsBackgroundService(MqttPublisher mqttPublisher
                     {
                         if (hardware.HardwareType == HardwareType.Cpu)
                         {
-                            cpuTemp = hardware.FindTemperature("Package", "Tctl", "Tdie", "Core (Tctl/Tdie)");
+                            cpuTemp = hardware.FindTemperature(
+                                "Package",
+                                "Tctl",
+                                "Tdie",
+                                "Core (Tctl/Tdie)"
+                            );
                         }
 
-                        if (hardware.HardwareType is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel)
+                        if (
+                            hardware.HardwareType
+                            is HardwareType.GpuNvidia
+                                or HardwareType.GpuAmd
+                                or HardwareType.GpuIntel
+                        )
                         {
                             gpuTemp = hardware.FindTemperature("Core");
                         }
-
-                        // Motherboard Super I/O chips often report CPU temperature on AMD systems
-                        // where direct CPU SMU access fails
-                        if (cpuTemp is null && hardware.HardwareType == HardwareType.Motherboard)
-                        {
-                            cpuTemp = hardware.FindTemperature("CPU");
-                        }
                     }
 
-                    // WMI fallback (returns stale ACPI value on some systems, used as last resort)
-                    cpuTemp ??= WmiTemperatureReader.GetCpuTemperature();
+                    // On AMD APUs, the SMU often fails but the AMD Display Library
+                    // reports real-time CPU temperature via ADL_PMLOG_TEMPERATURE_CPU
+                    cpuTemp ??= amdAdl?.GetCpuTemperature();
 
                     // Collect battery info
                     double? batteryPercent = null;
@@ -196,7 +198,10 @@ internal sealed class SystemMetricsBackgroundService(MqttPublisher mqttPublisher
                     {
                         var battery = hardwareInfo.BatteryList[0];
                         batteryPercent = battery.EstimatedChargeRemaining;
-                        batteryCharging = battery.BatteryStatusDescription?.Contains("Charging", StringComparison.OrdinalIgnoreCase);
+                        batteryCharging = battery.BatteryStatusDescription?.Contains(
+                            "Charging",
+                            StringComparison.OrdinalIgnoreCase
+                        );
                     }
 
                     var metricsData = new SystemMetricsData
@@ -207,13 +212,24 @@ internal sealed class SystemMetricsBackgroundService(MqttPublisher mqttPublisher
                         GpuTempCelsius = gpuTemp.HasValue ? Math.Round(gpuTemp.Value) : null,
                         BatteryPercent = batteryPercent,
                         BatteryCharging = batteryCharging,
-                        Timestamp = DateTime.Now
+                        Timestamp = DateTime.Now,
                     };
 
                     logger.LogInformation(
                         "Collected system metrics: CPU {CpuPercent}%, RAM {RamPercent}%, CPU Temp {CpuTemp}°C, GPU Temp {GpuTemp}°C, Battery {BatteryPercent}% (Charging: {BatteryCharging})",
-                        cpuPercent, memoryPercent, cpuTemp, gpuTemp, batteryPercent, batteryCharging);
-                    await mqttPublisher.PublishAsync("system-metrics", metricsData, SourceGenerationContext.Default.SystemMetricsData, stoppingToken);
+                        cpuPercent,
+                        memoryPercent,
+                        cpuTemp,
+                        gpuTemp,
+                        batteryPercent,
+                        batteryCharging
+                    );
+                    await mqttPublisher.PublishAsync(
+                        "system-metrics",
+                        metricsData,
+                        SourceGenerationContext.Default.SystemMetricsData,
+                        stoppingToken
+                    );
                 }
                 catch (Exception ex)
                 {
@@ -230,6 +246,7 @@ internal sealed class SystemMetricsBackgroundService(MqttPublisher mqttPublisher
         finally
         {
             computer.Close();
+            amdAdl?.Dispose();
         }
     }
 }
@@ -256,33 +273,122 @@ internal sealed class SystemMetricsData
 [JsonSerializable(typeof(SystemMetricsData))]
 internal partial class SourceGenerationContext : JsonSerializerContext { }
 
-internal static class WmiTemperatureReader
+/// <summary>
+/// Reads CPU temperature from AMD Display Library (ADL) PMLOG on AMD APU systems.
+/// On Ryzen APUs, LibreHardwareMonitor's SMU access often fails, but the integrated
+/// GPU driver exposes real-time CPU temperature via ADL_PMLOG_TEMPERATURE_CPU.
+/// </summary>
+internal sealed class AmdAdlTemperature : IDisposable
 {
-    /// <summary>
-    /// Reads CPU temperature via WMI MSAcpi_ThermalZoneTemperature.
-    /// Returns temperature in Celsius, or null if unavailable.
-    /// </summary>
-    public static double? GetCpuTemperature()
-    {
-        try
-        {
-            using var searcher = new ManagementObjectSearcher(
-                @"root\WMI",
-                "SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
+    private const int AdlOk = 0;
+    private const int AdlPmlogTemperatureCpu = 32; // AI: 31
+    private const int AdlPmlogMaxSensors = 256;
 
-            foreach (ManagementObject obj in searcher.Get())
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr AdlMainMemoryAllocDelegate(int size);
+
+    // Must be stored to prevent GC from collecting it while ADL holds the pointer
+    private static readonly AdlMainMemoryAllocDelegate MemoryAllocDelegate = size =>
+        Marshal.AllocHGlobal(size);
+
+    [DllImport("atiadlxx.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int ADL2_Main_Control_Create(
+        AdlMainMemoryAllocDelegate callback,
+        int enumConnectedAdapters,
+        out IntPtr context
+    );
+
+    [DllImport("atiadlxx.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int ADL2_Main_Control_Destroy(IntPtr context);
+
+    [DllImport("atiadlxx.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int ADL2_Adapter_NumberOfAdapters_Get(
+        IntPtr context,
+        out int numAdapters
+    );
+
+    [DllImport("atiadlxx.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int ADL2_New_QueryPMLogData_Get(
+        IntPtr context,
+        int adapterIndex,
+        out AdlPmLogDataOutput data
+    );
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct AdlSingleSensorData
+    {
+        public int Supported;
+        public int Value;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct AdlPmLogDataOutput
+    {
+        public int Size;
+
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = AdlPmlogMaxSensors)]
+        public AdlSingleSensorData[] Sensors;
+    }
+
+    private readonly IntPtr _context;
+    private readonly int _adapterIndex;
+
+    private AmdAdlTemperature(IntPtr context, int adapterIndex)
+    {
+        _context = context;
+        _adapterIndex = adapterIndex;
+    }
+
+    public static AmdAdlTemperature? TryCreate(ILogger logger)
+    {
+        if (ADL2_Main_Control_Create(MemoryAllocDelegate, 1, out var context) != AdlOk)
+            return null;
+
+        if (
+            ADL2_Adapter_NumberOfAdapters_Get(context, out int numAdapters) != AdlOk
+            || numAdapters == 0
+        )
+        {
+            ADL2_Main_Control_Destroy(context);
+            return null;
+        }
+
+        // Find the first adapter that supports ADL_PMLOG_TEMPERATURE_CPU
+        for (int i = 0; i < numAdapters; i++)
+        {
+            if (
+                ADL2_New_QueryPMLogData_Get(context, i, out var data) == AdlOk
+                && data.Sensors[AdlPmlogTemperatureCpu].Supported != 0
+            )
             {
-                var tempCelsius = (Convert.ToDouble(obj["CurrentTemperature"]) / 10.0) - 273.15;
-                if (tempCelsius is > 0 and < 150)
-                    return Math.Round(tempCelsius);
+                logger.LogInformation(
+                    "AMD ADL: using adapter {Index} for CPU temperature (PMLOG)",
+                    i
+                );
+                return new AmdAdlTemperature(context, i);
             }
         }
-        catch
-        {
-            // WMI thermal zone not available on this system
-        }
+
+        ADL2_Main_Control_Destroy(context);
+        return null;
+    }
+
+    public double? GetCpuTemperature()
+    {
+        if (ADL2_New_QueryPMLogData_Get(_context, _adapterIndex, out var data) != AdlOk)
+            return null;
+
+        var sensor = data.Sensors[AdlPmlogTemperatureCpu];
+        if (sensor.Supported != 0 && sensor.Value is > 0 and < 150)
+            return sensor.Value;
 
         return null;
+    }
+
+    public void Dispose()
+    {
+        if (_context != IntPtr.Zero)
+            ADL2_Main_Control_Destroy(_context);
     }
 }
 
@@ -301,7 +407,11 @@ internal static class HardwareSensorExtensions
         {
             if (sensor.Value is > 0)
             {
-                if (preferredNames.Any(name => sensor.Name.Contains(name, StringComparison.OrdinalIgnoreCase)))
+                if (
+                    preferredNames.Any(name =>
+                        sensor.Name.Contains(name, StringComparison.OrdinalIgnoreCase)
+                    )
+                )
                     return sensor.Value;
                 fallback ??= sensor.Value;
             }
@@ -317,9 +427,9 @@ internal static class HardwareSensorExtensions
                 yield return sensor;
 
         foreach (var sub in hardware.SubHardware)
-            foreach (var sensor in sub.Sensors)
-                if (sensor.SensorType == SensorType.Temperature)
-                    yield return sensor;
+        foreach (var sensor in sub.Sensors)
+            if (sensor.SensorType == SensorType.Temperature)
+                yield return sensor;
     }
 }
 
@@ -340,13 +450,14 @@ internal sealed class UpdateVisitor : IVisitor
     }
 
     public void VisitSensor(ISensor sensor) { }
+
     public void VisitParameter(IParameter parameter) { }
 }
 
 internal sealed class MqttPublisher(ILogger<MqttPublisher> logger)
 {
     private IMqttClient? _client;
-    
+
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
         logger.LogInformation("Connecting to MQTT broker...");
@@ -367,7 +478,12 @@ internal sealed class MqttPublisher(ILogger<MqttPublisher> logger)
         logger.LogInformation("Connected to MQTT broker at {Host}:{Port}", host, port);
     }
 
-    public async Task PublishAsync<T>(string topic, T data, JsonTypeInfo<T> jsonTypeInfo, CancellationToken cancellationToken = default)
+    public async Task PublishAsync<T>(
+        string topic,
+        T data,
+        JsonTypeInfo<T> jsonTypeInfo,
+        CancellationToken cancellationToken = default
+    )
     {
         if (_client is null)
         {
