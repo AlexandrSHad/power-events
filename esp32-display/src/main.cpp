@@ -20,6 +20,9 @@
 #define MQTT_PORT 1883
 #define MQTT_TOPIC "power-events"
 
+// Seq logging configuration (disable to stop sending logs via MQTT)
+#define SEQ_LOGGING_ENABLED true
+
 // =============================================================================
 // Color Palette
 // =============================================================================
@@ -98,6 +101,23 @@ static lv_obj_t* battery_body_obj = NULL;
 // WiFi and MQTT
 WiFiConnection wifi("ESP32-Display-setup", RGB_LED_PIN);
 MqttClient mqtt(MQTT_BROKER, MQTT_PORT);
+
+// =============================================================================
+// Seq logging function - sends logs to MQTT topic
+// =============================================================================
+void logToSeq(const char* level, const char* message) {
+    // Always log to serial
+    Serial0.printf("[%s] %s\n", level, message);
+    
+    // Only send to Seq via MQTT if enabled
+    #if SEQ_LOGGING_ENABLED
+    char topic[128];
+    snprintf(topic, sizeof(topic), "logs/esp32/%s/%s", 
+             WiFi.getHostname() ? WiFi.getHostname() : "unknown", 
+             level);
+    mqtt.publish(topic, message);
+    #endif
+}
 
 // =============================================================================
 // LovyanGFX configuration for GC9A01
@@ -546,17 +566,19 @@ void update_metrics_animation(lv_timer_t* timer) {
 void onPowerEvent(const char* topic, const char* payload) {
     JsonDocument doc;
     if (deserializeJson(doc, payload) != DeserializationError::Ok) {
-        Serial0.println("Failed to parse JSON payload");
+        logToSeq("error", "Failed to parse JSON payload");
         return;
     }
 
     const char* state = doc["State"];
     if (state == nullptr) {
-        Serial0.println("State field not found in payload");
+        logToSeq("error", "State field not found in payload");
         return;
     }
 
-    Serial0.printf("Received state: %s\n", state);
+    char msg[64];
+    snprintf(msg, sizeof(msg), "Received power state: %s", state);
+    logToSeq("info", msg);
 
     PowerStatus newStatus;
     if (strcmp(state, "Awake") == 0) {

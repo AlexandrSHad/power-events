@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -6,11 +6,38 @@ using System.Text.Json.Serialization.Metadata;
 using LibreHardwareMonitor.Hardware;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using MQTTnet;
+using Serilog;
+using Serilog.Events;
 
 var host = Host.CreateDefaultBuilder(args)
     .UseWindowsService(o => o.ServiceName = "PowerEvents")
+    .UseSerilog(
+        (context, services, loggerConfiguration) =>
+        {
+            var seqEnabled = context.Configuration.GetValue<bool>("Seq:Enabled", true);
+            var seqUrl = context.Configuration.GetValue<string>(
+                "Seq:ServerUrl",
+                "http://localhost:5341"
+            );
+
+            loggerConfiguration
+                .ReadFrom.Configuration(context.Configuration)
+                .Enrich.FromLogContext()
+                .Enrich.WithProperty("Component", "PowerEvents")
+                .Enrich.WithProperty("DeviceId", Environment.MachineName);
+
+            if (seqEnabled)
+            {
+                loggerConfiguration.WriteTo.Seq(
+                    seqUrl,
+                    restrictedToMinimumLevel: LogEventLevel.Information
+                );
+            }
+
+            loggerConfiguration.WriteTo.Console();
+        }
+    )
     .ConfigureServices(services =>
     {
         services.AddSingleton<MqttPublisher>();
