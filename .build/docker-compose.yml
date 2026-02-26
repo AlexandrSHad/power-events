@@ -2,7 +2,7 @@ name: power-events
 
 services:
   web-client:
-#    image: oleksshad/power-events.web-client:latest
+    #    image: oleksshad/power-events.web-client:latest
     build:
       context: ../web-client
       dockerfile: ../web-client/Dockerfile
@@ -13,7 +13,15 @@ services:
       - backend
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:80",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -26,13 +34,21 @@ services:
     container_name: power-events.backend
     ports:
       - "5550:8080"
-    environment:                                                                                            
+    environment:
       - ASPNETCORE_ENVIRONMENT=Production
     depends_on:
       - emqx
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/version"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8080/version",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -42,10 +58,10 @@ services:
     image: emqx/emqx:latest
     container_name: power-events.emqx
     ports:
-      - "1883:1883"      # MQTT
-#      - "8083:8083"      # MQTT over WebSocket
-#      - "8084:8084"      # MQTT over WSS
-      - "18083:18083"    # Web Dashboard
+      - "1883:1883" # MQTT
+      #      - "8083:8083"      # MQTT over WebSocket
+      #      - "8084:8084"      # MQTT over WSS
+      - "18083:18083" # Web Dashboard
     restart: unless-stopped
     environment:
       - EMQX_NAME=emqx
@@ -56,3 +72,18 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  seq:
+    image: datalust/seq:latest
+    container_name: seq
+    ports:
+      - "5341:80"
+    environment:
+      - ACCEPT_EULA=Y
+    volumes:
+      - seq-data:/data
+    restart: unless-stopped
+
+volumes:
+  seq-data:
+    driver: local
